@@ -12,6 +12,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600&display=swap" rel="stylesheet">
     <!-- Supabase JS SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- SheetJS (xlsx) สำหรับ Export Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- Supabase Config File -->
     <script src="supabase-config.js"></script>
     <style>
@@ -146,7 +148,14 @@
 
     <!-- ตารางหลัก: ตารางบันทึกและติดตามระยะทางรถ (ทั้งหมด) -->
     <div class="max-w-full mx-auto bg-white shadow-lg rounded-xl p-6 overflow-hidden">
-        <h2 class="text-xl font-bold mb-4 text-blue-600">ตารางบันทึกและติดตามระยะทางรถ (ทั้งหมด)</h2>
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
+            <h2 class="text-xl font-bold text-blue-600">ตารางบันทึกและติดตามระยะทางรถ (ทั้งหมด)</h2>
+            <button type="button" onclick="exportToExcel()"
+                class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md transition flex items-center space-x-1.5">
+                <span>📥</span>
+                <span>Download Excel (ทุกหน้า)</span>
+            </button>
+        </div>
 
         <div class="overflow-x-auto">
             <table id="vehicleTable"
@@ -477,6 +486,96 @@
             document.getElementById('topLowestBody').innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-400">${message}</td></tr>`;
             document.getElementById('recentUpdatedBody').innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-400">${message}</td></tr>`;
         }
+
+        // ----------------------------------------------------
+        // Export Excel ทุกหน้า (ทุก Row ใน DataTable)
+        // ----------------------------------------------------
+        function exportToExcel() {
+            if (!dataTable) {
+                alert('ยังไม่มีข้อมูลในตาราง');
+                return;
+            }
+
+            const headers = [
+                'เบอร์', 'ทะเบียน', 'เลขไมล์ปัจจุบัน', 'รอบเช็คระยะ',
+                'เหลือ (กม.)', 'เลขไมล์เดือนก่อน', 'รวมระยะทางต่อเดือน',
+                'กม./วัน', 'วันคงเหลือ/วัน', 'วันที่ขอเลขไมล์',
+                'วันที่/เวลาอัพเดต', 'เลขไมล์เช็คระยะล่าสุด', 'วันที่เช็คระยะ',
+                'รอบเช็คล่าสุด', 'เลขไมล์เช็คครั้งต่อไป',
+                'รอบเช็คครั้งต่อไป', 'วันที่เข้ารอบต่อไป'
+            ];
+
+            const rows = [];
+
+            // วนดึงข้อมูลทุก Row รวมทุกหน้า (dataTable.rows() ดึงทุกหน้า)
+            dataTable.rows().every(function () {
+                const tr = $(this.node());
+                const num      = tr.find('.vehicle-num').text().trim();
+                const plate    = tr.find('.vehicle-plate').text().trim();
+                const current  = tr.find('.current-mileage').val() || '0';
+                const interval = tr.find('.service-interval').text().replace(/,/g, '').trim();
+                const remain   = tr.find('.remaining-km').text().replace(/,/g, '').trim();
+                const prev     = tr.find('.prev-mileage').text().replace(/,/g, '').trim();
+                const totalRun = tr.find('.total-run').text().replace(/,/g, '').trim();
+                const kmPerDay = tr.find('.km-per-day').text().replace(/,/g, '').trim();
+                const days     = tr.find('.days-to-service').text().replace(/,/g, '').trim();
+                const reqDate  = tr.find('.request-date').text().trim();
+                const updTs    = tr.find('.update-timestamp').text().trim();
+                const lastKm   = tr.find('.last-service-km').text().replace(/,/g, '').trim();
+                const servDate = tr.find('.service-date').text().trim();
+                const lastRnd  = tr.find('.last-service-round').text().replace(/,/g, '').trim();
+                const nextKm   = tr.find('.last-service-next').text().replace(/,/g, '').trim();
+                const nextRnd  = tr.find('.next-service-round').text().replace(/,/g, '').trim();
+                const nextDate = tr.find('.next-service-date').text().trim();
+
+                rows.push([
+                    num, plate,
+                    parseInt(current) || 0,
+                    parseInt(interval) || 0,
+                    parseInt(remain) || 0,
+                    parseInt(prev) || 0,
+                    parseInt(totalRun) || 0,
+                    parseInt(kmPerDay) || 0,
+                    parseInt(days) || 0,
+                    reqDate, updTs,
+                    parseInt(lastKm) || 0,
+                    servDate,
+                    parseInt(lastRnd) || 0,
+                    parseInt(nextKm) || 0,
+                    parseInt(nextRnd) || 0,
+                    nextDate
+                ]);
+            });
+
+            if (rows.length === 0) {
+                alert('ไม่มีข้อมูลในตาราง');
+                return;
+            }
+
+            // สร้าง Workbook ด้วย SheetJS
+            const wb = XLSX.utils.book_new();
+            const wsData = [headers, ...rows];
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+            // กำหนดความกว้างคอลัมน์อัตโนมัติ
+            const colWidths = headers.map((h, i) => {
+                const maxLen = Math.max(
+                    h.length,
+                    ...rows.map(r => String(r[i] ?? '').length)
+                );
+                return { wch: Math.min(maxLen + 2, 30) };
+            });
+            ws['!cols'] = colWidths;
+
+            XLSX.utils.book_append_sheet(wb, ws, 'ระยะทางรถ');
+
+            // ตั้งชื่อไฟล์ตามวันที่วันนี้
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+            XLSX.writeFile(wb, `vehicle_mileage_${dateStr}.xlsx`);
+        }
+
+
 
         // ----------------------------------------------------
         // ฟังก์ชันควบคุม Pop-up นำเข้าชุดข้อมูล (Bulk Update)
