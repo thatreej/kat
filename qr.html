@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="description" content="สแกน QR Code ด้วยกล้องมือถือ ใช้งานได้ทันทีบนเบราว์เซอร์">
+    <title>สแกน QR Code จากกล้องมือถือ</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ฟอนต์ Sarabun -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <style>
+        /* ระบบสแกน QR Code - สไตล์เฉพาะหน้า (ไม่พึ่งไฟล์ภายนอก) */
+        body {
+            font-family: 'Sarabun', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #video {
+            background-color: #030712;
+        }
+
+        /* มุมมืดรอบกรอบสแกน */
+        .scan-dim {
+            background: radial-gradient(circle at center, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0) 32%, rgba(3, 7, 18, 0.55) 68%);
+        }
+
+        /* เส้นเลเซอร์กวาดขึ้น-ลงในกรอบสแกน */
+        @keyframes laserSweep {
+            0% {
+                top: 6%;
+            }
+
+            50% {
+                top: 90%;
+            }
+
+            100% {
+                top: 6%;
+            }
+        }
+
+        .laser-line {
+            animation: laserSweep 2.2s ease-in-out infinite;
+        }
+
+        /* กะพริบสีเขียวเมื่อสแกนสำเร็จ */
+        @keyframes successFlash {
+            0% {
+                box-shadow: inset 0 0 0 4px rgba(16, 185, 129, 0.95);
+            }
+
+            100% {
+                box-shadow: inset 0 0 0 4px rgba(16, 185, 129, 0);
+            }
+        }
+
+        .success-flash {
+            animation: successFlash 0.6s ease-out 2;
+        }
+
+        /* ซ่อนลูกศรของ input file */
+        input[type="file"] {
+            display: none;
+        }
+
+        button,
+        label.btn-tap {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 min-h-screen p-3 sm:p-4">
+    <!-- แถบด้านบน: ชื่อระบบและสถานะกล้อง/ความปลอดภัย -->
+    <div class="max-w-5xl mx-auto bg-white shadow-md rounded-xl p-4 mb-4 flex flex-wrap justify-between items-center gap-3 border-b-2 border-indigo-500">
+        <div class="flex items-center space-x-3">
+            <span class="text-3xl">🔳</span>
+            <div>
+                <h1 class="text-lg sm:text-xl font-bold text-gray-800">ระบบสแกน QR Code จากกล้องมือถือ</h1>
+                <p class="text-xs text-gray-500">ใช้กล้องหลังของมือถือสแกน QR Code / บาร์โค้ด แล้วนำผลลัพธ์ไปใช้ต่อได้ทันที</p>
+            </div>
+        </div>
+        <div class="flex items-center flex-wrap gap-2">
+            <span id="secureBadge" class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-300">
+                <span id="secureDot" class="w-2 h-2 mr-1.5 rounded-full bg-gray-400"></span><span id="secureText">กำลังตรวจสอบความปลอดภัย...</span>
+            </span>
+            <span id="cameraBadge" class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-300">
+                📷 กล้อง: ปิดอยู่
+            </span>
+        </div>
+    </div>
+
+    <div class="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- คอลัมน์ซ้าย: กล้อง -->
+        <div class="lg:col-span-2 space-y-4">
+            <div class="bg-white shadow-lg rounded-xl p-4">
+                <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
+                    <h2 class="text-base font-bold text-gray-800">📷 กล้องสแกน</h2>
+                    <span id="engineBadge" class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                        ตัวถอดรหัส: กำลังตรวจสอบ...
+                    </span>
+                </div>
+
+                <!-- พื้นที่แสดงภาพจากกล้อง -->
+                <div id="viewer" class="relative w-full overflow-hidden rounded-xl bg-gray-900 aspect-square sm:aspect-video">
+                    <video id="video" class="absolute inset-0 w-full h-full object-cover" playsinline autoplay muted></video>
+
+                    <!-- กรอบสแกน + เลเซอร์ (แสดงเฉพาะตอนสแกน) -->
+                    <div id="scanFrame" class="hidden absolute inset-0 pointer-events-none">
+                        <div class="absolute inset-0 scan-dim"></div>
+                        <div class="absolute left-1/2 top-1/2 w-[68%] max-w-[260px] aspect-square -translate-x-1/2 -translate-y-1/2">
+                            <div class="absolute inset-0 rounded-2xl border border-white/40"></div>
+                            <div class="absolute -top-[2px] -left-[2px] w-8 h-8 border-t-4 border-l-4 border-emerald-400 rounded-tl-2xl"></div>
+                            <div class="absolute -top-[2px] -right-[2px] w-8 h-8 border-t-4 border-r-4 border-emerald-400 rounded-tr-2xl"></div>
+                            <div class="absolute -bottom-[2px] -left-[2px] w-8 h-8 border-b-4 border-l-4 border-emerald-400 rounded-bl-2xl"></div>
+                            <div class="absolute -bottom-[2px] -right-[2px] w-8 h-8 border-b-4 border-r-4 border-emerald-400 rounded-br-2xl"></div>
+                            <div class="laser-line absolute left-3 right-3 h-[2px] rounded bg-gradient-to-r from-transparent via-emerald-300 to-transparent"></div>
+                        </div>
+                        <p class="absolute left-0 right-0 bottom-3 text-center text-[11px] text-white/90">วาง QR Code ให้อยู่ในกรอบ ระยะห่างประมาณ 10–20 ซม.</p>
+                    </div>
+
+                    <!-- สถานะเริ่มต้น: ต้องกดปุ่มจึงเปิดกล้องได้ (iOS/Android บังคับ) -->
+                    <div id="cameraIdle" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-900 text-white text-center p-6">
+                        <span class="text-5xl">📷</span>
+                        <p class="text-sm text-gray-300">แตะปุ่มด้านล่างเพื่อเริ่มสแกน<br>ระบบจะขออนุญาตใช้งานกล้องหลังของมือถือ</p>
+                        <button type="button" onclick="toggleScan()"
+                            class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 transition text-white px-6 py-3 rounded-xl font-semibold shadow-lg">
+                            ▶ เริ่มสแกน
+                        </button>
+                    </div>
+
+                    <!-- สถานะข้อผิดพลาด -->
+                    <div id="cameraError" class="hidden absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-900 text-white text-center p-6">
+                        <span class="text-5xl">⚠️</span>
+                        <p id="cameraErrorText" class="text-sm text-gray-200">ไม่สามารถเปิดกล้องได้</p>
+                        <button type="button" onclick="retryCamera()"
+                            class="bg-white text-gray-800 hover:bg-gray-100 px-5 py-2.5 rounded-lg text-sm font-semibold">
+                            ลองใหม่อีกครั้ง
+                        </button>
+                    </div>
+                </div>
+                <!-- ปุ่มควบคุมกล้อง -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                    <button type="button" id="toggleScanBtn" onclick="toggleScan()"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2.5 rounded-lg text-xs font-semibold shadow transition">
+                        ▶ เริ่มสแกน
+                    </button>
+                    <button type="button" id="switchCameraBtn" onclick="switchCamera()"
+                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2.5 rounded-lg text-xs font-semibold transition">
+                        🔄 สลับกล้อง
+                    </button>
+                    <button type="button" id="torchBtn" onclick="toggleTorch()" disabled
+                        class="bg-gray-200 hover:bg-gray-300 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed">
+                        🔦 ไฟฉาย
+                    </button>
+                    <label for="fileInput" class="btn-tap bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2.5 rounded-lg text-xs font-semibold text-center transition cursor-pointer">
+                        🖼️ สแกนจากรูป
+                    </label>
+                    <input type="file" id="fileInput" accept="image/*" onchange="scanFromFile(this)">
+                </div>
+
+                <!-- เลือกกล้อง (กรณีมือถือมีหลายเลนส์) + ซูม -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                    <div>
+                        <label for="cameraSelect" class="block text-[11px] font-semibold text-gray-500 mb-1">เลือกกล้องที่ต้องการใช้</label>
+                        <select id="cameraSelect" onchange="selectCamera(this.value)" disabled
+                            class="w-full border border-gray-300 rounded px-2 py-2 text-xs bg-white outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-gray-100 disabled:text-gray-400">
+                            <option value="">ยังไม่พร้อมใช้งาน</option>
+                        </select>
+                    </div>
+                    <div id="zoomWrap" class="hidden">
+                        <label for="zoomRange" class="block text-[11px] font-semibold text-gray-500 mb-1">
+                            ซูมภาพ (ช่วยสแกน QR ขนาดเล็ก): <span id="zoomValue">1</span>x
+                        </label>
+                        <input type="range" id="zoomRange" min="1" max="5" step="0.1" value="1" oninput="applyZoom(this.value)"
+                            class="w-full accent-indigo-600">
+                    </div>
+                </div>
+
+                <p id="statusText" class="mt-3 text-xs text-gray-500">พร้อมใช้งาน — กดปุ่ม “เริ่มสแกน” เพื่อเปิดกล้อง</p>
+            </div>
+
+            <!-- การ์ดผลการสแกน -->
+            <div class="bg-white shadow-lg rounded-xl p-4">
+                <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+                    <h2 class="text-base font-bold text-gray-800">✅ ผลการสแกน</h2>
+                    <span id="resultTypeBadge" class="hidden inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border"></span>
+                </div>
+
+                <p id="resultEmpty" class="text-xs text-gray-400 mb-2">ยังไม่มีผลการสแกน — เปิดกล้องแล้วหันไปที่ QR Code ได้เลย</p>
+
+                <textarea id="resultText" rows="3" readonly placeholder="ผลลัพธ์จะแสดงที่นี่..."
+                    class="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono bg-gray-50 outline-none resize-y hidden"></textarea>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                    <button type="button" id="copyBtn" onclick="copyResult()" disabled
+                        class="bg-gray-200 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed">
+                        📋 คัดลอก
+                    </button>
+                    <button type="button" id="openBtn" onclick="openResult()" disabled
+                        class="bg-gray-200 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed">
+                        🔗 เปิด/ใช้งาน
+                    </button>
+                    <button type="button" id="shareBtn" onclick="shareResult()" disabled
+                        class="bg-gray-200 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed">
+                        📤 แชร์
+                    </button>
+                    <button type="button" id="resumeBtn" onclick="resumeScan()" disabled
+                        class="bg-gray-200 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed">
+                        🔄 สแกนใหม่
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- คอลัมน์ขวา: ตั้งค่า + ประวัติ + คำแนะนำ -->
+        <div class="space-y-4">
+            <div class="bg-white shadow-lg rounded-xl p-4">
+                <h2 class="text-base font-bold mb-2 text-gray-800">⚙️ ตั้งค่าการสแกน</h2>
+                <label class="flex items-center justify-between gap-3 py-2 border-b border-gray-100">
+                    <span class="text-sm text-gray-700">🔊 เสียงบี๊บเมื่อสแกนสำเร็จ</span>
+                    <input type="checkbox" id="optSound" onchange="updateSetting('sound', this.checked)" class="w-5 h-5 accent-indigo-600">
+                </label>
+                <label class="flex items-center justify-between gap-3 py-2 border-b border-gray-100">
+                    <span class="text-sm text-gray-700">📳 สั่นเตือนเมื่อสแกนสำเร็จ</span>
+                    <input type="checkbox" id="optVibrate" onchange="updateSetting('vibrate', this.checked)" class="w-5 h-5 accent-indigo-600">
+                </label>
+                <label class="flex items-center justify-between gap-3 py-2 border-b border-gray-100">
+                    <span class="text-sm text-gray-700">🔁 สแกนต่อเนื่อง (ไม่หยุดหลังเจอ)</span>
+                    <input type="checkbox" id="optContinuous" onchange="updateSetting('continuous', this.checked)" class="w-5 h-5 accent-indigo-600">
+                </label>
+                <label class="flex items-center justify-between gap-3 py-2">
+                    <span class="text-sm text-gray-700">🚀 เปิดลิงก์อัตโนมัติเมื่อเจอ URL</span>
+                    <input type="checkbox" id="optAutoOpen" onchange="updateSetting('autoOpenUrl', this.checked)" class="w-5 h-5 accent-indigo-600">
+                </label>
+            </div>
+
+            <div class="bg-white shadow-lg rounded-xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-base font-bold text-gray-800">🕘 ประวัติการสแกน</h2>
+                    <button type="button" onclick="clearHistory()" class="text-[11px] text-red-500 hover:text-red-700 font-semibold">ล้างทั้งหมด</button>
+                </div>
+                <p id="historyEmpty" class="text-xs text-gray-400">ยังไม่มีประวัติ (เก็บไว้ในเครื่องนี้ 30 รายการล่าสุด)</p>
+                <ul id="historyList" class="space-y-2 max-h-72 overflow-y-auto"></ul>
+            </div>
+
+            <div class="bg-white shadow-lg rounded-xl p-4">
+                <h2 class="text-base font-bold mb-2 text-gray-800">💡 ข้อควรรู้</h2>
+                <ul class="text-xs text-gray-600 space-y-1.5 list-disc pl-4">
+                    <li>ต้องเปิดหน้านี้ผ่าน <b>https://</b> หรือ <b>localhost</b> เบราว์เซอร์จึงจะอนุญาตให้ใช้กล้อง</li>
+                    <li>บน iOS/iPadOS (Safari) ต้องกดปุ่ม “เริ่มสแกน” ก่อน จึงจะเปิดกล้องได้</li>
+                    <li>หากภาพเบลอ ให้เช็ดเลนส์ หรือกดปุ่ม 🔦 ไฟฉาย (ถ้ามี) และใช้แถบซูมช่วย</li>
+                    <li>สแกนไม่ได้? กด “🖼️ สแกนจากรูป” แล้วเลือกรูปภาพที่มี QR Code แทนได้</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- ส่วนท้าย -->
+    <p class="max-w-5xl mx-auto mt-4 mb-6 text-center text-[11px] text-gray-400">
+        ระบบสแกน QR Code ด้วยกล้องมือถือ — ประมวลผลในเบราว์เซอร์ทั้งหมด ไม่มีการส่งข้อมูลออกไปยังเซิร์ฟเวอร์
+    </p>
+
+    <script>
+        /* ============================================================
+           ระบบสแกน QR Code ด้วยกล้องมือถือ (ไฟล์เดียว)
+           ตัวถอดรหัส: BarcodeDetector ของเบราว์เซอร์ (ถ้ารองรับ) หรือ jsQR จาก CDN
+           ============================================================ */
+        'use strict';
+
+        // ----------------------------------------------------
+        // ค่าคงที่ / ค่าตั้งต้น
+        // ----------------------------------------------------
+        const JSQR_CDN_LIST = [
+            'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+            'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
+        ];
+        const NATIVE_FORMATS = ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'itf', 'upc_a', 'upc_e'];
+        const DECODE_INTERVAL_MS = 180;   // ถอดรหัสประมาณ 5 ครั้ง/วินาที (ประหยัดแบต)
+        const MAX_DECODE_SIZE = 640;      // ย่อภาพก่อนส่งให้ jsQR
+        const DUP_GUARD_MS = 1500;        // กันผลลัพธ์ซ้ำภายในเวลานี้
+        const HISTORY_KEY = 'qr_scan_history_v1';
+        const SETTINGS_KEY = 'qr_scan_settings_v1';
+
+        const settings = {
+            sound: true,
+            vibrate: true,
+            continuous: true,
+            autoOpenUrl: false
+        };
+
+        // สถานะการทำงานของกล้อง/การสแกน
+        let stream = null;
+        let videoTrack = null;
+        let nativeDetector = null;
+        let jsqrReady = false;
+        let scanning = false;      // กำลังวนถอดรหัสจากวิดีโออยู่หรือไม่
+        let decoding = false;      // กันเรียกถอดรหัสซ้อนกัน
+        let rafId = null;
+        let lastDecodeAt = 0;
+        let lastResultText = '';
+        let lastResultAt = 0;
+        let currentResultText = '';
+        let facingMode = 'environment';
+        let torchOn = false;
+        let torchSupported = false;
+        let zoomSupported = false;
+        let audioCtx = null;
+        let scanHistory = [];
+
+        // อ้างอิง DOM
+        const $ = (id) => document.getElementById(id);
+        const video = $('video');
+        const scanFrame = $('scanFrame');
+        const cameraIdle = $('cameraIdle');
+        const cameraError = $('cameraError');
+        const cameraErrorText = $('cameraErrorText');
+        const statusText = $('statusText');
+        const cameraBadge = $('cameraBadge');
+        const cameraSelect = $('cameraSelect');
+        const engineBadge = $('engineBadge');
+        const toggleScanBtn = $('toggleScanBtn');
+        const torchBtn = $('torchBtn');
+        const zoomWrap = $('zoomWrap');
+        const zoomRange = $('zoomRange');
+        const resultText = $('resultText');
+        const resultEmpty = $('resultEmpty');
+        const resultTypeBadge = $('resultTypeBadge');
+        const copyBtn = $('copyBtn');
+        const openBtn = $('openBtn');
+        const shareBtn = $('shareBtn');
+        const resumeBtn = $('resumeBtn');
+        const historyList = $('historyList');
+        const historyEmpty = $('historyEmpty');
+
+        // canvas ซ่อน ใช้ดึงภาพนิ่งจากวิดีโอส่งให้ jsQR
+        const workCanvas = document.createElement('canvas');
+        const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+
+        // ----------------------------------------------------
+        // ฟังก์ชันช่วยแสดงสถานะบนหน้าจอ
+        // ----------------------------------------------------
+        function setStatus(message, tone = 'normal') {
+            const colors = {
+                normal: 'text-gray-500',
+                info: 'text-indigo-600',
+                success: 'text-emerald-600',
+                warn: 'text-amber-600',
+                error: 'text-red-600'
+            };
+            statusText.className = 'mt-3 text-xs font-medium ' + (colors[tone] || colors.normal);
+            statusText.textContent = message;
+        }
+
+        function setCameraBadge(state) {
+            const styles = {
+                off: 'bg-gray-100 text-gray-600 border-gray-300',
+                on: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                error: 'bg-red-50 text-red-700 border-red-200'
+            };
+            const labels = {
+                off: '📷 กล้อง: ปิดอยู่',
+                on: '🟢 กล้อง: เปิดใช้งาน',
+                error: '⚠️ กล้อง: เปิดไม่ได้'
+            };
+            cameraBadge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold border ' + styles[state];
+            cameraBadge.textContent = labels[state];
+        }
+
+        function setSecureBadge() {
+            const badge = $('secureBadge');
+            const dot = $('secureDot');
+            const label = $('secureText');
+            if (window.isSecureContext) {
+                badge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+                dot.className = 'w-2 h-2 mr-1.5 rounded-full bg-emerald-500';
+                label.textContent = 'เชื่อมต่อปลอดภัย (HTTPS)';
+            } else {
+                badge.className = 'inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200';
+                dot.className = 'w-2 h-2 mr-1.5 rounded-full bg-red-500';
+                label.textContent = 'ไม่ใช่ HTTPS — กล้องจะใช้งานไม่ได้';
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, (ch) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[ch]));
+        }
+        // ----------------------------------------------------
+        // โหลดไลบรารีและเลือกตัวถอดรหัส
+        // ----------------------------------------------------
+        function loadScript(src, timeoutMs = 8000) {
+            return new Promise((resolve, reject) => {
+                const el = document.createElement('script');
+                const timer = setTimeout(() => {
+                    el.onload = null;
+                    el.onerror = null;
+                    reject(new Error('หมดเวลาโหลด: ' + src));
+                }, timeoutMs);
+
+                el.src = src;
+                el.async = true;
+                el.onload = () => {
+                    clearTimeout(timer);
+                    resolve(true);
+                };
+                el.onerror = () => {
+                    clearTimeout(timer);
+                    reject(new Error('โหลดไม่สำเร็จ: ' + src));
+                };
+                document.head.appendChild(el);
+            });
+        }
+
+        // ลองโหลด jsQR จาก CDN หลายแหล่ง (เผื่อแหล่งแรกใช้งานไม่ได้)
+        async function ensureJsQR() {
+            if (window.jsQR) { jsqrReady = true; return true; }
+            for (const url of JSQR_CDN_LIST) {
+                try {
+                    await loadScript(url);
+                    if (window.jsQR) { jsqrReady = true; return true; }
+                } catch (err) {
+                    // ลองแหล่งถัดไป
+                }
+            }
+            jsqrReady = false;
+            return false;
+        }
+
+        // ใช้ BarcodeDetector ของเบราว์เซอร์ก่อน (เร็ว/แม่นบน Android) ถ้าไม่มีจึงใช้ jsQR
+        async function initDecoder() {
+            if ('BarcodeDetector' in window) {
+                try {
+                    const supported = await window.BarcodeDetector.getSupportedFormats();
+                    const formats = NATIVE_FORMATS.filter((f) => supported.includes(f));
+                    if (formats.length) nativeDetector = new window.BarcodeDetector({ formats });
+                } catch (err) {
+                    nativeDetector = null;
+                }
+            }
+
+            const hasJsQR = await ensureJsQR();
+
+            if (nativeDetector) {
+                engineBadge.textContent = 'ตัวถอดรหัส: BarcodeDetector (เร็ว)';
+                engineBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200';
+            } else if (hasJsQR) {
+                engineBadge.textContent = 'ตัวถอดรหัส: jsQR';
+                engineBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200';
+            } else {
+                engineBadge.textContent = 'ตัวถอดรหัส: ไม่พร้อมใช้งาน';
+                engineBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200';
+                setStatus('โหลดไลบรารีถอดรหัสไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้าใหม่อีกครั้ง', 'error');
+            }
+        }
+
+        // ----------------------------------------------------
+        // จัดการข้อความผิดพลาดของกล้อง (ภาษาไทย)
+        // ----------------------------------------------------
+        function mapCameraError(err) {
+            const name = err && err.name ? err.name : '';
+            if (name === 'NotAllowedError' || name === 'SecurityError') {
+                return 'คุณยังไม่ได้อนุญาตให้ใช้กล้อง — กดไอคอนกุญแจ/กล้องบนแถบที่อยู่เบราว์เซอร์ แล้วเลือก “อนุญาต” จากนั้นกดลองใหม่';
+            }
+            if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+                return 'ไม่พบกล้องที่ใช้งานได้บนอุปกรณ์นี้ (หรือกล้องไม่รองรับค่าที่ขอ) กรุณากด “สลับกล้อง” หรือเปิดจากมือถือ';
+            }
+            if (name === 'NotReadableError' || name === 'AbortError') {
+                return 'กล้องถูกโปรแกรมอื่นใช้งานอยู่ — ปิดแอปกล้อง/Zoom/Teams แล้วกดลองใหม่อีกครั้ง';
+            }
+            if (name === 'NotSupportedError') {
+                return 'เบราว์เซอร์นี้ไม่รองรับการใช้งานกล้อง กรุณาใช้ Chrome หรือ Safari เวอร์ชันใหม่';
+            }
+            return 'ไม่สามารถเปิดกล้องได้: ' + (err && err.message ? err.message : 'ไม่ทราบสาเหตุ');
+        }
+
+        function showCameraError(message) {
+            cameraErrorText.textContent = message;
+            cameraIdle.classList.add('hidden');
+            cameraError.classList.remove('hidden');
+            scanFrame.classList.add('hidden');
+            setCameraBadge('error');
+            setStatus(message, 'error');
+        }
+
+        function hideCameraError() {
+            cameraError.classList.add('hidden');
+        }
+        // ----------------------------------------------------
+        // เปิด / ปิด กล้อง
+        // ----------------------------------------------------
+        async function startCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showCameraError('เบราว์เซอร์นี้ไม่รองรับการเข้าถึงกล้อง (getUserMedia) กรุณาใช้ Chrome หรือ Safari เวอร์ชันใหม่');
+                return false;
+            }
+            if (!window.isSecureContext) {
+                showCameraError('ต้องเปิดหน้านี้ผ่าน https:// หรือ localhost เท่านั้น เบราว์เซอร์จึงจะอนุญาตให้ใช้กล้อง');
+                return false;
+            }
+
+            stopCamera(false);
+            hideCameraError();
+            setStatus('กำลังขออนุญาตใช้งานกล้อง...', 'info');
+
+            const constraints = {
+                audio: false,
+                video: {
+                    facingMode: { ideal: facingMode },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (err) {
+                // อุปกรณ์อาจไม่รองรับค่าที่ขอ (เช่นไม่มีกล้องตาม facingMode) → ลองขอแบบผ่อนปรน
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+                } catch (err2) {
+                    showCameraError(mapCameraError(err2));
+                    return false;
+                }
+            }
+
+            videoTrack = stream.getVideoTracks()[0] || null;
+            video.srcObject = stream;
+            video.setAttribute('playsinline', 'true');
+            try {
+                await video.play();
+            } catch (err) {
+                // บางเบราว์เซอร์ต้องรอให้ผู้ใช้แตะหน้าจอก่อน — ผู้ใช้กดปุ่มมาแล้วจึงมักไม่เกิดปัญหา
+            }
+
+            cameraIdle.classList.add('hidden');
+            scanFrame.classList.remove('hidden');
+            setCameraBadge('on');
+            toggleScanBtn.textContent = '⏹ หยุด';
+            toggleScanBtn.className = 'bg-red-500 hover:bg-red-600 text-white px-3 py-2.5 rounded-lg text-xs font-semibold shadow transition';
+            resumeBtn.disabled = false;
+            resumeBtn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2.5 rounded-lg text-xs font-semibold transition';
+
+            await prepareTrackFeatures();
+            await buildCameraList();
+            startScanLoop();
+            setStatus('กำลังสแกน — หันกล้องไปที่ QR Code ให้อยู่ในกรอบ', 'info');
+            return true;
+        }
+
+        // ตรวจว่ากล้องที่เปิดอยู่รองรับไฟฉาย (torch) และซูม หรือไม่
+        async function prepareTrackFeatures() {
+            torchSupported = false;
+            zoomSupported = false;
+            torchOn = false;
+
+            let caps = {};
+            try {
+                caps = videoTrack && videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+            } catch (err) {
+                caps = {};
+            }
+
+            if (caps && caps.torch === true) torchSupported = true;
+            torchBtn.disabled = !torchSupported;
+            torchBtn.textContent = '🔦 ไฟฉาย';
+            torchBtn.className = torchSupported
+                ? 'bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2.5 rounded-lg text-xs font-semibold transition'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed';
+
+            if (caps && typeof caps.zoom === 'object' && caps.zoom) {
+                zoomSupported = true;
+                const min = caps.zoom.min || 1;
+                const max = caps.zoom.max || 1;
+                const step = caps.zoom.step || 0.1;
+                zoomRange.min = min;
+                zoomRange.max = max;
+                zoomRange.step = step;
+                zoomRange.value = Math.min(Math.max(1, min), max);
+                $('zoomValue').textContent = Number(zoomRange.value).toFixed(1);
+                zoomWrap.classList.remove('hidden');
+            } else {
+                zoomWrap.classList.add('hidden');
+            }
+        }
+
+        function stopCamera(updateUi = true) {
+            stopScanLoop();
+            if (stream) {
+                stream.getTracks().forEach((track) => track.stop());
+            }
+            stream = null;
+            videoTrack = null;
+            video.srcObject = null;
+            torchOn = false;
+            torchSupported = false;
+            zoomSupported = false;
+            torchBtn.disabled = true;
+            cameraSelect.disabled = true;
+            cameraSelect.innerHTML = '<option value="">ยังไม่พร้อมใช้งาน</option>';
+            zoomWrap.classList.add('hidden');
+
+            if (updateUi) {
+                scanFrame.classList.add('hidden');
+                cameraIdle.classList.remove('hidden');
+                hideCameraError();
+                setCameraBadge('off');
+                toggleScanBtn.textContent = '▶ เริ่มสแกน';
+                toggleScanBtn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2.5 rounded-lg text-xs font-semibold shadow transition';
+                setStatus('ปิดกล้องแล้ว — กด “เริ่มสแกน” เพื่อเปิดใหม่');
+            }
+        }
+        // ----------------------------------------------------
+        // เลือก / สลับกล้อง (มือถือบางรุ่นมีหลายเลนส์)
+        // ----------------------------------------------------
+        async function buildCameraList() {
+            try {
+                const devices = (await navigator.mediaDevices.enumerateDevices())
+                    .filter((device) => device.kind === 'videoinput');
+                if (!devices.length) {
+                    cameraSelect.disabled = true;
+                    cameraSelect.innerHTML = '<option value="">ไม่พบกล้อง</option>';
+                    return;
+                }
+                let activeId = '';
+                try {
+                    activeId = videoTrack && videoTrack.getSettings ? (videoTrack.getSettings().deviceId || '') : '';
+                } catch (err) {
+                    activeId = '';
+                }
+                cameraSelect.innerHTML = devices.map((device, index) =>
+                    '<option value="' + escapeHtml(device.deviceId) + '">' +
+                    escapeHtml(device.label || ('กล้อง ' + (index + 1))) +
+                    '</option>'
+                ).join('');
+                cameraSelect.disabled = false;
+                if (activeId) cameraSelect.value = activeId;
+            } catch (err) {
+                cameraSelect.disabled = true;
+                cameraSelect.innerHTML = '<option value="">อ่านรายชื่อกล้องไม่ได้</option>';
+            }
+        }
+
+        async function selectCamera(deviceId) {
+            if (!deviceId || !stream) return;
+            setStatus('กำลังเปลี่ยนกล้อง...', 'info');
+            try {
+                const nextStream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+                });
+                if (stream) stream.getTracks().forEach((track) => track.stop());
+                stream = nextStream;
+                videoTrack = stream.getVideoTracks()[0] || null;
+                video.srcObject = stream;
+                try {
+                    await video.play();
+                } catch (err) {
+                    /* บางเบราว์เซอร์ต้องมี interaction ก่อน */
+                }
+                await prepareTrackFeatures();
+                await buildCameraList();
+                setStatus('เปลี่ยนกล้องแล้ว', 'success');
+            } catch (err) {
+                showCameraError(mapCameraError(err));
+            }
+        }
+
+        async function switchCamera() {
+            facingMode = (facingMode === 'environment') ? 'user' : 'environment';
+            const label = (facingMode === 'environment') ? 'กล้องหลัง' : 'กล้องหน้า';
+            if (!stream) {
+                setStatus('จะใช้' + label + 'เมื่อกด “เริ่มสแกน”', 'info');
+                return;
+            }
+            setStatus('กำลังสลับเป็น' + label + '...', 'info');
+            await startCamera();
+        }
+
+        function retryCamera() {
+            hideCameraError();
+            startCamera();
+        }
+        // ----------------------------------------------------
+        // ไฟฉาย / ซูม
+        // ----------------------------------------------------
+        async function toggleTorch() {
+            if (!videoTrack || !torchSupported) {
+                setStatus('อุปกรณ์หรือกล้องนี้ไม่รองรับการเปิดไฟฉาย', 'warn');
+                return;
+            }
+            try {
+                torchOn = !torchOn;
+                await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+                torchBtn.textContent = torchOn ? '🔦 ปิดไฟฉาย' : '🔦 ไฟฉาย';
+                torchBtn.className = torchOn
+                    ? 'bg-amber-400 hover:bg-amber-500 text-gray-900 px-3 py-2.5 rounded-lg text-xs font-semibold transition'
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2.5 rounded-lg text-xs font-semibold transition';
+                setStatus(torchOn ? 'เปิดไฟฉายแล้ว' : 'ปิดไฟฉายแล้ว', 'info');
+            } catch (err) {
+                torchOn = false;
+                setStatus('ไม่สามารถเปิดไฟฉายได้บนอุปกรณ์นี้', 'warn');
+            }
+        }
+
+        async function applyZoom(value) {
+            $('zoomValue').textContent = Number(value).toFixed(1);
+            if (!videoTrack || !zoomSupported) return;
+            try {
+                await videoTrack.applyConstraints({ advanced: [{ zoom: Number(value) }] });
+            } catch (err) {
+                /* อุปกรณ์ไม่รองรับค่าซูมนี้ */
+            }
+        }
+
+        // ----------------------------------------------------
+        // ปุ่มเริ่ม/หยุด และการสแกนต่อเนื่อง
+        // ----------------------------------------------------
+        function unlockAudio() {
+            try {
+                if (!audioCtx) {
+                    const Ctx = window.AudioContext || window.webkitAudioContext;
+                    if (Ctx) audioCtx = new Ctx();
+                }
+                if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            } catch (err) {
+                audioCtx = null;
+            }
+        }
+
+        async function toggleScan() {
+            unlockAudio();
+
+            // ถ้ากล้องกำลังทำงานอยู่ ปุ่มนี้จะทำหน้าที่ปิดกล้อง
+            if (stream) {
+                stopCamera(true);
+                return;
+            }
+
+            // กรณีกดเร็วเกินไปตอนเปิดหน้าเว็บ ให้รอไลบรารีโหลดให้เสร็จก่อน
+            if (!nativeDetector && !jsqrReady) {
+                await ensureJsQR();
+            }
+            if (!nativeDetector && !jsqrReady) {
+                showCameraError('ยังโหลดไลบรารีถอดรหัสไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้าใหม่อีกครั้ง');
+                return;
+            }
+
+            await startCamera();
+        }
+
+        function pauseScan() {
+            stopScanLoop();
+        }
+
+        function resumeScan() {
+            if (!stream) {
+                toggleScan();
+                return;
+            }
+            startScanLoop();
+            setStatus('พร้อมสแกนต่อ — หันกล้องไปที่ QR Code', 'info');
+        }
+        // ----------------------------------------------------
+        // วนอ่านภาพจากกล้องและถอดรหัส
+        // ----------------------------------------------------
+        function startScanLoop() {
+            if (scanning || !stream) return;
+            scanning = true;
+            scanFrame.classList.remove('hidden');
+
+            const tick = async () => {
+                if (!scanning) return;
+                rafId = requestAnimationFrame(tick);
+
+                if (decoding) return;
+                const now = Date.now();
+                if (now - lastDecodeAt < DECODE_INTERVAL_MS) return;
+                if (!video.videoWidth || video.readyState < 2) return;
+
+                lastDecodeAt = now;
+                decoding = true;
+                try {
+                    await decodeFrame();
+                } catch (err) {
+                    // อ่านเฟรมนี้ไม่สำเร็จ ลองรอบถัดไป
+                } finally {
+                    decoding = false;
+                }
+            };
+            rafId = requestAnimationFrame(tick);
+        }
+
+        function stopScanLoop() {
+            scanning = false;
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        }
+
+        // อ่าน 1 เฟรม: ใช้ BarcodeDetector ก่อน ถ้าไม่ได้ผลจึงใช้ jsQR
+        async function decodeFrame() {
+            let text = '';
+
+            if (nativeDetector) {
+                try {
+                    const codes = await nativeDetector.detect(video);
+                    if (codes && codes.length) text = codes[0].rawValue || '';
+                } catch (err) {
+                    // ตัวถอดรหัสของเบราว์เซอร์ล้มเหลวในรอบนี้ → ลอง jsQR ต่อ
+                }
+            }
+
+            if (!text && window.jsQR) {
+                const vw = video.videoWidth;
+                const vh = video.videoHeight;
+                const scale = Math.min(1, MAX_DECODE_SIZE / Math.max(vw, vh));
+                const w = Math.max(1, Math.round(vw * scale));
+                const h = Math.max(1, Math.round(vh * scale));
+                workCanvas.width = w;
+                workCanvas.height = h;
+                workCtx.drawImage(video, 0, 0, w, h);
+                const image = workCtx.getImageData(0, 0, w, h);
+                const code = window.jsQR(image.data, w, h, { inversionAttempts: 'attemptBoth' });
+                if (code && code.data) text = code.data;
+            }
+
+            if (text) handleResult(text, 'camera');
+        }
+
+        // ----------------------------------------------------
+        // เมื่อได้ผลลัพธ์จากการสแกน
+        // ----------------------------------------------------
+        function handleResult(text, source = 'camera') {
+            const now = Date.now();
+            if (text === lastResultText && (now - lastResultAt) < DUP_GUARD_MS) return;
+            lastResultText = text;
+            lastResultAt = now;
+
+            showResult(text);
+            addHistory(text);
+            feedbackSuccess();
+
+            const type = detectType(text);
+            if (settings.autoOpenUrl && type.key === 'url') openResult();
+
+            if (source !== 'camera') {
+                setStatus('อ่าน QR Code จากรูปภาพสำเร็จ', 'success');
+                return;
+            }
+
+            if (settings.continuous) {
+                setStatus('สแกนสำเร็จ! กำลังรอ QR Code ถัดไป...', 'success');
+            } else {
+                pauseScan();
+                setStatus('สแกนสำเร็จแล้ว! กด “สแกนใหม่” เพื่อสแกนต่อ', 'success');
+            }
+        }
+
+        // สัญญาณตอบรับ: กะพริบกรอบ สั่น และเสียงบี๊บ
+        function feedbackSuccess() {
+            const box = $('viewer');
+            box.classList.remove('success-flash');
+            void box.offsetWidth;
+            box.classList.add('success-flash');
+
+            if (settings.vibrate && navigator.vibrate) {
+                try {
+                    navigator.vibrate(120);
+                } catch (err) {
+                    /* อุปกรณ์ไม่รองรับการสั่น */
+                }
+            }
+
+            if (!settings.sound || !audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = 1046;
+                gain.gain.value = 0.12;
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.14);
+            } catch (err) {
+                /* สร้างเสียงไม่สำเร็จ ข้ามไป */
+            }
+        }
+        // ----------------------------------------------------
+        // แสดงผลลัพธ์และปุ่มจัดการผลลัพธ์
+        // ----------------------------------------------------
+        function detectType(text) {
+            const value = String(text).trim();
+            if (/^https?:\/\//i.test(value)) {
+                return { key: 'url', label: '🔗 ลิงก์เว็บ', action: '🔗 เปิดลิงก์', style: 'bg-indigo-50 text-indigo-700 border-indigo-200' };
+            }
+            if (/^mailto:/i.test(value) || /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(value)) {
+                return { key: 'email', label: '✉️ อีเมล', action: '✉️ ส่งอีเมล', style: 'bg-purple-50 text-purple-700 border-purple-200' };
+            }
+            if (/^tel:/i.test(value) || /^\+?[0-9\s\-()]{8,}$/.test(value)) {
+                return { key: 'phone', label: '📞 เบอร์โทร', action: '📞 โทรออก', style: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+            }
+            if (/^WIFI:/i.test(value)) {
+                return { key: 'wifi', label: '📶 Wi-Fi', action: '', style: 'bg-sky-50 text-sky-700 border-sky-200' };
+            }
+            if (/^BEGIN:VCARD/i.test(value)) {
+                return { key: 'vcard', label: '👤 นามบัตร', action: '', style: 'bg-amber-50 text-amber-700 border-amber-200' };
+            }
+            if (/^geo:/i.test(value)) {
+                return { key: 'geo', label: '📍 พิกัดแผนที่', action: '📍 เปิดแผนที่', style: 'bg-rose-50 text-rose-700 border-rose-200' };
+            }
+            return { key: 'text', label: '📝 ข้อความ', action: '', style: 'bg-gray-100 text-gray-700 border-gray-300' };
+        }
+
+        function showResult(text) {
+            currentResultText = text;
+            resultText.value = text;
+            resultText.classList.remove('hidden');
+            resultEmpty.classList.add('hidden');
+
+            const type = detectType(text);
+            resultTypeBadge.textContent = type.label;
+            resultTypeBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ' + type.style;
+            resultTypeBadge.classList.remove('hidden');
+
+            setResultButtonsEnabled(true);
+            openBtn.textContent = type.action || '🔗 เปิด/ใช้งาน';
+            shareBtn.classList.toggle('hidden', typeof navigator.share !== 'function');
+        }
+
+        function setResultButtonsEnabled(enabled) {
+            [copyBtn, openBtn, shareBtn].forEach((btn) => {
+                btn.disabled = !enabled;
+                btn.className = enabled
+                    ? 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-3 py-2.5 rounded-lg text-xs font-semibold transition'
+                    : 'bg-gray-200 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed';
+            });
+            resumeBtn.disabled = !enabled;
+            resumeBtn.className = enabled
+                ? 'bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2.5 rounded-lg text-xs font-semibold transition'
+                : 'bg-gray-200 text-gray-400 px-3 py-2.5 rounded-lg text-xs font-semibold transition cursor-not-allowed';
+        }
+
+        async function copyResult() {
+            if (!currentResultText) return;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(currentResultText);
+                } else {
+                    resultText.classList.remove('hidden');
+                    resultText.select();
+                    document.execCommand('copy');
+                    resultText.blur();
+                }
+                setStatus('คัดลอกผลลัพธ์แล้ว', 'success');
+            } catch (err) {
+                setStatus('คัดลอกไม่สำเร็จ — แตะค้างที่ข้อความเพื่อคัดลอกด้วยตนเอง', 'warn');
+            }
+        }
+
+        function openResult() {
+            if (!currentResultText) return;
+            const type = detectType(currentResultText);
+            const value = currentResultText.trim();
+            let url = '';
+
+            if (type.key === 'url') {
+                url = value;
+            } else if (type.key === 'email') {
+                url = /^mailto:/i.test(value) ? value : ('mailto:' + value);
+            } else if (type.key === 'phone') {
+                url = /^tel:/i.test(value) ? value : ('tel:' + value.replace(/[^+0-9]/g, ''));
+            } else if (type.key === 'geo') {
+                const coords = value.replace(/^geo:/i, '').split(',');
+                if (coords.length >= 2) {
+                    url = 'https://www.google.com/maps?q=' + encodeURIComponent(coords[0]) + ',' + encodeURIComponent(coords[1]);
+                }
+            }
+
+            if (!url) {
+                copyResult();
+                setStatus('ข้อมูลชนิดนี้ไม่มีลิงก์ให้เปิด — คัดลอกไว้ให้แล้ว', 'info');
+                return;
+            }
+            window.open(url, '_blank', 'noopener');
+        }
+
+        async function shareResult() {
+            if (!currentResultText) return;
+            try {
+                if (typeof navigator.share === 'function') {
+                    await navigator.share({ title: 'ผลการสแกน QR Code', text: currentResultText });
+                } else {
+                    await copyResult();
+                }
+            } catch (err) {
+                // ผู้ใช้กดยกเลิกการแชร์
+            }
+        }
+        // ----------------------------------------------------
+        // ประวัติการสแกน (เก็บใน localStorage ของเครื่องนี้)
+        // ----------------------------------------------------
+        function formatTime(timestamp) {
+            if (!timestamp) return '';
+            try {
+                return new Date(timestamp).toLocaleString('th-TH', {
+                    day: '2-digit', month: '2-digit', year: '2-digit',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            } catch (err) {
+                return '';
+            }
+        }
+
+        function loadHistory() {
+            try {
+                const raw = localStorage.getItem(HISTORY_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                scanHistory = Array.isArray(parsed) ? parsed : [];
+            } catch (err) {
+                scanHistory = [];
+            }
+            renderHistory();
+        }
+
+        function saveHistory() {
+            try {
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(scanHistory));
+            } catch (err) {
+                /* โหมดส่วนตัวบางเบราว์เซอร์เขียนไม่ได้ ข้ามไป */
+            }
+        }
+
+        function addHistory(text) {
+            scanHistory = scanHistory.filter((item) => item.text !== text);
+            scanHistory.unshift({ text: text, time: Date.now() });
+            if (scanHistory.length > 30) scanHistory = scanHistory.slice(0, 30);
+            saveHistory();
+            renderHistory();
+        }
+
+        function removeHistory(index) {
+            scanHistory.splice(index, 1);
+            saveHistory();
+            renderHistory();
+        }
+
+        function clearHistory() {
+            if (!scanHistory.length) return;
+            if (!confirm('ต้องการล้างประวัติการสแกนทั้งหมดใช่หรือไม่?')) return;
+            scanHistory = [];
+            saveHistory();
+            renderHistory();
+            setStatus('ล้างประวัติการสแกนแล้ว', 'info');
+        }
+
+        function useHistory(index) {
+            const item = scanHistory[index];
+            if (!item) return;
+            showResult(item.text);
+            setStatus('ดึงผลลัพธ์จากประวัติแล้ว', 'info');
+            resultText.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function renderHistory() {
+            if (!scanHistory.length) {
+                historyList.innerHTML = '';
+                historyEmpty.classList.remove('hidden');
+                return;
+            }
+            historyEmpty.classList.add('hidden');
+            historyList.innerHTML = scanHistory.map((item, index) => {
+                const type = detectType(item.text);
+                const text = String(item.text);
+                const preview = text.length > 120 ? (text.slice(0, 120) + '…') : text;
+                return '<li class="flex items-start gap-2 border border-gray-200 rounded-lg p-2 hover:bg-indigo-50 transition">' +
+                    '<button type="button" class="flex-1 text-left min-w-0" onclick="useHistory(' + index + ')">' +
+                    '<span class="block text-[10px] text-gray-400">' + type.label + ' • ' + formatTime(item.time) + '</span>' +
+                    '<span class="block text-xs font-mono break-all text-gray-700">' + escapeHtml(preview) + '</span>' +
+                    '</button>' +
+                    '<button type="button" class="text-gray-400 hover:text-red-500 text-lg leading-none px-1" title="ลบรายการนี้" onclick="removeHistory(' + index + ')">×</button>' +
+                    '</li>';
+            }).join('');
+        }
+        // ----------------------------------------------------
+        // สแกนจากไฟล์รูปภาพ (ใช้เป็นทางเลือกสำรอง)
+        // ----------------------------------------------------
+        function loadImageFromFile(file) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    URL.revokeObjectURL(url);
+                    resolve(img);
+                };
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    reject(new Error('อ่านไฟล์รูปภาพไม่ได้'));
+                };
+                img.src = url;
+            });
+        }
+
+        async function scanFromFile(input) {
+            const file = input.files && input.files[0];
+            input.value = '';
+            if (!file) return;
+
+            setStatus('กำลังอ่าน QR Code จากรูปภาพ...', 'info');
+            try {
+                if (!nativeDetector && !jsqrReady) await ensureJsQR();
+                const img = await loadImageFromFile(file);
+                const text = await decodeImage(img);
+                if (text) {
+                    handleResult(text, 'file');
+                } else {
+                    setStatus('ไม่พบ QR Code ในรูปภาพนี้ — ลองใช้รูปที่ชัดขึ้น หรือครอปให้ใกล้ QR Code มากขึ้น', 'warn');
+                }
+            } catch (err) {
+                setStatus('สแกนจากรูปภาพไม่สำเร็จ: ' + err.message, 'error');
+            }
+        }
+
+        // อ่าน QR Code จากภาพนิ่ง (ใช้ BarcodeDetector ก่อน แล้วจึง jsQR)
+        async function decodeImage(img) {
+            if (nativeDetector) {
+                try {
+                    const codes = await nativeDetector.detect(img);
+                    if (codes && codes.length && codes[0].rawValue) return codes[0].rawValue;
+                } catch (err) {
+                    /* ลองวิธีถัดไป */
+                }
+            }
+
+            if (!window.jsQR) return '';
+
+            const maxSize = 1280;
+            const srcW = img.naturalWidth || img.width;
+            const srcH = img.naturalHeight || img.height;
+            const scale = Math.min(1, maxSize / Math.max(srcW, srcH));
+            const w = Math.max(1, Math.round(srcW * scale));
+            const h = Math.max(1, Math.round(srcH * scale));
+
+            workCanvas.width = w;
+            workCanvas.height = h;
+            workCtx.drawImage(img, 0, 0, w, h);
+            const data = workCtx.getImageData(0, 0, w, h);
+            const code = window.jsQR(data.data, w, h, { inversionAttempts: 'attemptBoth' });
+            return (code && code.data) ? code.data : '';
+        }
+        // ----------------------------------------------------
+        // ตั้งค่าที่ผู้ใช้เลือก (จำค่าไว้ในเครื่อง)
+        // ----------------------------------------------------
+        function loadSettings() {
+            try {
+                const raw = localStorage.getItem(SETTINGS_KEY);
+                if (raw) Object.assign(settings, JSON.parse(raw) || {});
+            } catch (err) {
+                /* ใช้ค่าเริ่มต้น */
+            }
+            $('optSound').checked = !!settings.sound;
+            $('optVibrate').checked = !!settings.vibrate;
+            $('optContinuous').checked = !!settings.continuous;
+            $('optAutoOpen').checked = !!settings.autoOpenUrl;
+        }
+
+        function updateSetting(key, value) {
+            settings[key] = !!value;
+            try {
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+            } catch (err) {
+                /* เขียนไม่ได้ก็ใช้ค่าในหน่วยความจำ */
+            }
+            if (key === 'sound' && value) unlockAudio();
+            if (key === 'continuous') {
+                setStatus(value
+                    ? 'เปิดโหมดสแกนต่อเนื่อง — สแกนได้หลาย QR Code ติดกัน'
+                    : 'ปิดโหมดสแกนต่อเนื่อง — สแกนสำเร็จแล้วระบบจะหยุดชั่วคราว', 'info');
+            }
+        }
+
+        // ----------------------------------------------------
+        // เริ่มต้นการทำงานของหน้า
+        // ----------------------------------------------------
+        function initApp() {
+            setSecureBadge();
+            setCameraBadge('off');
+            setResultButtonsEnabled(false);
+            loadSettings();
+            loadHistory();
+            initDecoder();
+
+            shareBtn.classList.toggle('hidden', typeof navigator.share !== 'function');
+
+            // หยุดอ่านภาพชั่วคราวเมื่อสลับแท็บ/ล็อกจอ เพื่อประหยัดแบตเตอรี่
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    if (scanning) pauseScan();
+                } else if (stream && settings.continuous) {
+                    startScanLoop();
+                }
+            });
+
+            // คืนทรัพยากรกล้องเมื่อออกจากหน้า
+            window.addEventListener('pagehide', () => {
+                if (stream) stopCamera(false);
+            });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+    </script>
+</body>
+
+</html>
