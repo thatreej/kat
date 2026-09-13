@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบติดตามระยะทางรถ</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- Supabase JS SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Supabase Config File -->
+    <script src="supabase-config.js"></script>
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+        }
+
+        .dataTables_wrapper .dataTables_length select {
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            padding: 0.25rem 2rem 0.25rem 0.5rem;
+            background-color: white;
+            outline: none;
+        }
+
+        .dataTables_wrapper .dataTables_filter input {
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            padding: 0.25rem 0.5rem;
+            background-color: white;
+            outline: none;
+        }
+
+        .details-control {
+            cursor: pointer;
+            text-align: center;
+            font-weight: bold;
+            color: #2563eb;
+        }
+
+        .inserted-header-row {
+            background-color: #eff6ff !important;
+            font-weight: bold;
+            color: #1e40af;
+            text-align: center;
+            font-size: 11px;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 p-4">
+
+    <!-- แถบด้านบน: ชื่อระบบและสถานะ Supabase -->
+    <div class="max-w-full mx-auto bg-white shadow-md rounded-xl p-4 mb-4 flex flex-wrap justify-between items-center gap-3 border-b-2 border-indigo-500">
+        <div class="flex items-center space-x-3">
+            <span class="text-3xl">🚗</span>
+            <div>
+                <h1 class="text-xl font-bold text-gray-800">ระบบบันทึกและติดตามระยะทางรถยนต์</h1>
+                <p class="text-xs text-gray-500">เชื่อมต่อ Cloud Database ด้วย Supabase & พร้อมใช้งานบน Vercel</p>
+            </div>
+        </div>
+        <div class="flex items-center flex-wrap gap-2">
+            <span id="supabaseStatusBadge" class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-300">
+                <span class="w-2 h-2 mr-1.5 rounded-full bg-gray-400"></span> กำลังตรวจสอบ Supabase...
+            </span>
+            <button type="button" onclick="openSupabaseModal()"
+                class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow transition flex items-center space-x-1">
+                <span>⚙️ ตั้งค่า Supabase</span>
+            </button>
+            <button type="button" onclick="openBulkPopup()"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs shadow transition font-semibold flex items-center space-x-1">
+                <span>📋 นำเข้าข้อมูลชุด</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Alert แจ้งเตือนหากยังไม่เชื่อมต่อ Supabase -->
+    <div id="supabaseAlertBanner" class="max-w-full mx-auto bg-amber-50 border border-amber-300 rounded-xl p-4 mb-4 flex flex-wrap justify-between items-center gap-2 hidden">
+        <div class="flex items-center space-x-3">
+            <span class="text-2xl">⚠️</span>
+            <div>
+                <h3 class="text-sm font-bold text-amber-800">ยังไม่ได้เชื่อมต่อกับ Supabase Database</h3>
+                <p class="text-xs text-amber-700">กรุณาคลิก "ตั้งค่า Supabase" เพื่อระบุ Project URL และ Anon Key เพื่อโหลดข้อมูลรถและประวัติ</p>
+            </div>
+        </div>
+        <button type="button" onclick="openSupabaseModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">
+            ⚡ ตั้งค่าเดี๋ยวนี้
+        </button>
+    </div>
+
+    <!-- ตารางที่ 1: รถที่เหลือระยะทางน้อยกว่า 4,000 กม. / เกินกำหนด -->
+    <div class="max-w-full mx-auto bg-white shadow-lg rounded-xl p-6 mb-6">
+        <h2 class="text-xl font-bold mb-3 text-red-600">🚨 รถที่เหลือระยะทางน้อยกว่า 4,000 กม. / เกินกำหนดเช็คระยะ</h2>
+        <div class="flex items-center space-x-3 mb-4">
+            <label for="topCount" class="text-sm font-semibold text-gray-700">แสดงจำนวน:</label>
+            <select id="topCount" onchange="renderTopLowest()"
+                class="border border-gray-300 rounded px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-red-400">
+                <option value="5">5 คัน</option>
+                <option value="10">10 คัน</option>
+                <option value="20" selected>20 คัน</option>
+                <option value="all">ทั้งหมด</option>
+            </select>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-xs text-center border">
+                <thead class="bg-red-50 text-red-800 font-semibold">
+                    <tr>
+                        <th class="px-3 py-2 border">อันดับ</th>
+                        <th class="px-3 py-2 border">เบอร์ / ติ๊กทำแล้ว</th>
+                        <th class="px-3 py-2 border">ทะเบียน</th>
+                        <th class="px-3 py-2 border bg-orange-100">เหลือ (กม.)</th>
+                        <th class="px-3 py-2 border">เลขไมล์เข้าเช็คระยะครั้งต่อไป</th>
+                        <th class="px-3 py-2 border">รอบเช็คระยะครั้งต่อไป</th>
+                        <th class="px-3 py-2 border bg-purple-100">วันที่เข้ารอบต่อไป</th>
+                        <th class="px-3 py-2 border bg-green-100">บันทึกด่วน</th>
+                    </tr>
+                </thead>
+                <tbody id="topLowestBody" class="divide-y divide-gray-200 bg-white">
+                    <!-- แทรกด้วย JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ตารางที่ 2: รถที่เพิ่งได้รับการอัพเดท / เพิ่งเข้าทำล่าสุด -->
+    <div class="max-w-full mx-auto bg-white shadow-lg rounded-xl p-6 mb-6">
+        <h2 class="text-xl font-bold mb-3 text-green-600">🛠️ รถที่เพิ่งได้รับการอัพเดท / เพิ่งเข้าทำล่าสุด</h2>
+        <div class="flex items-center space-x-3 mb-4">
+            <label for="recentCount" class="text-sm font-semibold text-gray-700">แสดงจำนวน:</label>
+            <select id="recentCount" onchange="renderRecentUpdated()"
+                class="border border-gray-300 rounded px-3 py-1 text-sm outline-none focus:ring-2 focus:ring-green-400">
+                <option value="5" selected>5 คัน</option>
+                <option value="10">10 คัน</option>
+                <option value="20">20 คัน</option>
+                <option value="all">ทั้งหมด</option>
+            </select>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-xs text-center border">
+                <thead class="bg-green-50 text-green-800 font-semibold">
+                    <tr>
+                        <th class="px-3 py-2 border">อันดับ</th>
+                        <th class="px-3 py-2 border">เบอร์</th>
+                        <th class="px-3 py-2 border">ทะเบียน</th>
+                        <th class="px-3 py-2 border bg-yellow-50">รายละเอียดการอัพเดทเลขไมล์ / ทำแล้ว</th>
+                        <th class="px-3 py-2 border">วันที่ขอเลขไมล์</th>
+                        <th class="px-3 py-2 border bg-indigo-50">วันที่/เวลาอัพเดต</th>
+                        <th class="px-3 py-2 border">เลขไมล์เช็คระยะล่าสุด</th>
+                        <th class="px-3 py-2 border">วันที่เช็คระยะ</th>
+                        <th class="px-3 py-2 border">รายละเอียด</th>
+                        <th class="px-3 py-2 border">สถานะ</th>
+                    </tr>
+                </thead>
+                <tbody id="recentUpdatedBody" class="divide-y divide-gray-200 bg-white">
+                    <!-- แทรกด้วย JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ตารางหลัก: ตารางบันทึกและติดตามระยะทางรถ (ทั้งหมด) -->
+    <div class="max-w-full mx-auto bg-white shadow-lg rounded-xl p-6 overflow-hidden">
+        <h2 class="text-xl font-bold mb-4 text-blue-600">ตารางบันทึกและติดตามระยะทางรถ (ทั้งหมด)</h2>
+
+        <div class="overflow-x-auto">
+            <table id="vehicleTable"
+                class="min-w-full divide-y divide-gray-200 text-xs text-center border stripe hover">
+                <thead class="bg-gray-50 text-gray-700 font-semibold">
+                    <tr>
+                        <th class="px-2 py-2 border">ดูประวัติ</th>
+                        <th class="px-2 py-2 border hidden">ID</th>
+                        <th class="px-2 py-2 border">เบอร์</th>
+                        <th class="px-2 py-2 border">ทะเบียน</th>
+                        <th class="px-2 py-2 border bg-yellow-50">เลขไมล์ปัจจุบัน</th>
+                        <th class="px-2 py-2 border">รอบเช็คระยะ</th>
+                        <th class="px-2 py-2 border bg-orange-50">เหลือ (คำนวณ)</th>
+                        <th class="px-2 py-2 border bg-blue-50">เลขไมล์เดือนก่อน</th>
+                        <th class="px-2 py-2 border bg-gray-100">รวมระยะทางที่วิ่งต่อเดือน</th>
+                        <th class="px-2 py-2 border bg-gray-100">ระยะทางที่วิ่ง กม./ต่อวัน</th>
+                        <th class="px-2 py-2 border bg-gray-100">นับจากวันคงเหลือเข้าเช็คระยะ/วัน</th>
+                        <th class="px-2 py-2 border bg-green-50">วันที่ขอเลขไมล์</th>
+                        <th class="px-2 py-2 border bg-indigo-50">วันที่/เวลาอัพเดต</th>
+                        <th class="px-2 py-2 border">เลขไมล์เช็คระยะล่าสุด</th>
+                        <th class="px-2 py-2 border">วันที่เช็คระยะ</th>
+                        <th class="px-2 py-2 border">รอบเช็คระยะครั้งล่าสุด</th>
+                        <th class="px-2 py-2 border">เลขไมล์เข้าเช็คระยะครั้งต่อไป</th>
+                        <th class="px-2 py-2 border">รอบเช็คระยะครั้งต่อไป</th>
+                        <th class="px-2 py-2 border bg-purple-50">วันที่เข้ารอบต่อไป</th>
+                        <th class="px-2 py-2 border bg-pink-50">รายละเอียด</th>
+                        <th class="px-2 py-2 border bg-teal-50">สถานะ (ทำแล้ว)</th>
+                        <th class="px-2 py-2 border">จัดการ</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody" class="divide-y divide-gray-200 bg-white">
+                    <!-- โหลดข้อมูลผ่าน Supabase -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal สำหรับตั้งค่าเชื่อมต่อ Supabase -->
+    <div id="supabaseConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-xl p-6 w-[500px] max-w-[95%] shadow-2xl">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-lg font-bold text-gray-800 flex items-center space-x-2">
+                    <span>⚡ ตั้งค่าการเชื่อมต่อ Supabase</span>
+                </h3>
+                <button type="button" onclick="closeSupabaseModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
+            </div>
+            <p class="text-xs text-gray-500 mb-4">
+                ข้อมูลการเชื่อมต่อจะถูกบันทึกไว้ใน Browser (localStorage) ปลอดภัยและเหมาะสำหรับการใช้งานบน Vercel
+            </p>
+
+            <div class="mb-3">
+                <label class="block text-xs font-semibold text-gray-700 mb-1">Supabase Project URL:</label>
+                <input type="text" id="supabaseUrlInput"
+                    class="w-full border border-gray-300 rounded p-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="https://xxxxxxxxxxxxxxxxxxxx.supabase.co">
+            </div>
+
+            <div class="mb-4">
+                <label class="block text-xs font-semibold text-gray-700 mb-1">Supabase Anon Public Key:</label>
+                <textarea id="supabaseKeyInput" rows="3"
+                    class="w-full border border-gray-300 rounded p-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-400"
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."></textarea>
+            </div>
+
+            <div id="supabaseTestResult" class="text-xs mb-3 hidden p-2.5 rounded border"></div>
+
+            <div class="flex justify-between items-center pt-2 border-t">
+                <button type="button" onclick="clearSupabaseConfig()"
+                    class="text-red-500 hover:text-red-700 text-xs font-semibold">ล้างค่าที่จำไว้</button>
+                <div class="flex space-x-2">
+                    <button type="button" onclick="closeSupabaseModal()"
+                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded text-xs">ปิด</button>
+                    <button type="button" onclick="saveAndTestSupabase()" id="btnSaveSupabase"
+                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded text-xs font-semibold shadow">บันทึก & เชื่อมต่อ</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal สำหรับเลือกวันที่ -->
+    <div id="dateModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-lg p-6 w-80 shadow-xl">
+            <h3 id="modalTitle" class="text-lg font-bold mb-3 text-gray-800">เลือกวันที่ขอเลขไมล์</h3>
+            <p id="modalDesc" class="text-sm text-gray-600 mb-2">เลือกวันที่ต้องการ (DD/MM/YYYY):</p>
+            <input type="date" id="modalDateInput"
+                class="w-full border rounded p-2 mb-4 text-center outline-none focus:ring-2 focus:ring-blue-400">
+            <div class="flex justify-end space-x-2">
+                <button type="button" onclick="closeModal()"
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded text-xs">ยกเลิก</button>
+                <button type="button" onclick="confirmUpdate()"
+                    class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded text-xs">ยืนยันอัพเดท</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal พิเศษสำหรับตารางเร่งด่วน -->
+    <div id="quickServiceModal"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-lg p-6 w-80 shadow-xl">
+            <h3 class="text-lg font-bold mb-3 text-green-700">🛠️ บันทึกการเช็คระยะ (ด่วน)</h3>
+            <p class="text-sm text-gray-600 mb-1">ระบุวันที่เช็คระยะ:</p>
+            <input type="date" id="quickServiceDateInput"
+                class="w-full border rounded p-2 mb-3 text-center outline-none focus:ring-2 focus:ring-green-400">
+            <p class="text-sm text-gray-600 mb-1">ระบุเลขไมล์เช็คระยะล่าสุด:</p>
+            <input type="number" id="quickServiceKmInput"
+                class="w-full border rounded p-2 mb-4 text-center font-bold text-red-600 outline-none focus:ring-2 focus:ring-green-400"
+                placeholder="เช่น 150000">
+            <div class="flex justify-end space-x-2">
+                <button type="button" onclick="closeQuickModal()"
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded text-xs">ยกเลิก</button>
+                <button type="button" onclick="confirmQuickService()"
+                    class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded text-xs">บันทึกข้อมูล</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal สำหรับนำเข้าข้อมูลชุดแบบ Pop-up -->
+    <div id="bulkPopupModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-xl p-6 w-[500px] max-w-[95%] shadow-2xl">
+            <h3 class="text-lg font-bold mb-2 text-indigo-700">📋 นำเข้าชุดข้อมูลเลขไมล์</h3>
+            <p class="text-xs text-gray-600 mb-3">รูปแบบข้อมูล: <code>เบอร์ [Tab] ทะเบียน [Tab] เลขไมล์ปัจจุบัน</code>
+                (คัดลอกข้อมูลจาก Excel หรือไฟล์ข้อความมาวางได้เลย)</p>
+            <textarea id="bulkDataInput" rows="8"
+                class="w-full border border-gray-300 rounded p-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-400 mb-4"
+                placeholder="วางข้อมูลชุดที่นี่..."></textarea>
+            <div class="flex justify-end space-x-2">
+                <button type="button" onclick="closeBulkPopup()"
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded text-xs">ยกเลิก</button>
+                <button type="button" onclick="processBulkImport()"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-xs font-semibold">ตรวจสอบและอัพเดต</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal ยืนยันการนำเข้าข้อมูลชุด (Bulk Import Preview) -->
+    <div id="bulkModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-lg p-6 w-96 max-w-[95%] shadow-xl">
+            <h3 class="text-lg font-bold mb-3 text-indigo-700">📋 ยืนยันการอัพเดตข้อมูลชุด</h3>
+            <p class="text-xs text-gray-600 mb-3" id="bulkModalSummary">กำลังตรวจสอบข้อมูล...</p>
+            <div class="flex justify-end space-x-2">
+                <button type="button" onclick="closeBulkModal()"
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded text-xs">ยกเลิก</button>
+                <button type="button" onclick="executeBulkImport()"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-xs">ยืนยันบันทึกทั้งหมด</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- jQuery และ DataTables JS -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+
+    <script>
+        let supabaseClient = null;
+        let dataTable;
+        let currentButton = null;
+        let currentQuickVehicleId = null;
+        let historyData = {};
+        let parsedBulkData = [];
+
+        // ----------------------------------------------------
+        // การจัดการ Supabase Client & Configuration
+        // ----------------------------------------------------
+        function getSupabaseCredentials() {
+            const localUrl = localStorage.getItem('kat_supabase_url');
+            const localKey = localStorage.getItem('kat_supabase_key');
+            if (localUrl && localKey) {
+                return { url: localUrl.trim(), anonKey: localKey.trim() };
+            }
+            if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.anonKey) {
+                return { url: window.SUPABASE_CONFIG.url.trim(), anonKey: window.SUPABASE_CONFIG.anonKey.trim() };
+            }
+            return null;
+        }
+
+        function updateSupabaseStatusBadge(isConnected, url = '') {
+            const badge = document.getElementById('supabaseStatusBadge');
+            const alertBanner = document.getElementById('supabaseAlertBanner');
+            if (!badge) return;
+
+            if (isConnected) {
+                let host = '';
+                try {
+                    host = new URL(url).hostname;
+                } catch (e) {
+                    host = url.replace('https://', '').split('/')[0] || 'Supabase';
+                }
+                badge.className = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-300";
+                badge.innerHTML = `<span class="w-2 h-2 mr-1.5 rounded-full bg-green-500"></span> 🟢 Supabase: ${host}`;
+                if (alertBanner) alertBanner.classList.add('hidden');
+            } else {
+                badge.className = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-300";
+                badge.innerHTML = `<span class="w-2 h-2 mr-1.5 rounded-full bg-amber-500"></span> ⚠️ ยังไม่เชื่อมต่อ Supabase`;
+                if (alertBanner) alertBanner.classList.remove('hidden');
+            }
+        }
+
+        function openSupabaseModal() {
+            const creds = getSupabaseCredentials() || { url: '', anonKey: '' };
+            document.getElementById('supabaseUrlInput').value = creds.url;
+            document.getElementById('supabaseKeyInput').value = creds.anonKey;
+            document.getElementById('supabaseTestResult').classList.add('hidden');
+            document.getElementById('supabaseConfigModal').classList.remove('hidden');
+        }
+
+        function closeSupabaseModal() {
+            document.getElementById('supabaseConfigModal').classList.add('hidden');
+        }
+
+        function clearSupabaseConfig() {
+            if (!confirm('ต้องการล้างค่าการเชื่อมต่อ Supabase ที่จำไว้ใน Browser หรือไม่?')) return;
+            localStorage.removeItem('kat_supabase_url');
+            localStorage.removeItem('kat_supabase_key');
+            document.getElementById('supabaseUrlInput').value = '';
+            document.getElementById('supabaseKeyInput').value = '';
+            supabaseClient = null;
+            updateSupabaseStatusBadge(false);
+            alert('ล้างค่าการเชื่อมต่อเรียบร้อยแล้ว');
+            closeSupabaseModal();
+            location.reload();
+        }
+
+        async function saveAndTestSupabase() {
+            const url = document.getElementById('supabaseUrlInput').value.trim();
+            const key = document.getElementById('supabaseKeyInput').value.trim();
+            const resDiv = document.getElementById('supabaseTestResult');
+
+            if (!url || !key) {
+                resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-red-50 text-red-700 border-red-200 block";
+                resDiv.textContent = "กรุณากรอกทั้ง Project URL และ Anon Key ให้ครบถ้วน";
+                return;
+            }
+
+            resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-blue-50 text-blue-700 border-blue-200 block";
+            resDiv.textContent = "กำลังทดสอบเชื่อมต่อไปยัง Supabase...";
+
+            try {
+                const testClient = window.supabase.createClient(url, key);
+                const { data, error } = await testClient.from('vehicles').select('id').limit(1);
+
+                if (error) throw error;
+
+                localStorage.setItem('kat_supabase_url', url);
+                localStorage.setItem('kat_supabase_key', key);
+                supabaseClient = testClient;
+
+                resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-green-50 text-green-700 border-green-200 block";
+                resDiv.textContent = "เชื่อมต่อสำเร็จและบันทึกเรียบร้อย! กำลังรีโหลดหน้าเว็บ...";
+
+                setTimeout(() => {
+                    closeSupabaseModal();
+                    location.reload();
+                }, 1000);
+
+            } catch (err) {
+                console.error("Test connection failed:", err);
+                resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-red-50 text-red-700 border-red-200 block";
+                resDiv.textContent = `เชื่อมต่อไม่สำเร็จ: ${err.message || 'โปรดตรวจสอบ URL, Key และ SQL Schema ใน Supabase'}`;
+            }
+        }
+
+        // ----------------------------------------------------
+        // ฟังก์ชันช่วยจัดรูปแบบข้อมูลและคำนวณ
+        // ----------------------------------------------------
+        function formatDateToDMY(dateStr) {
+            if (!dateStr || dateStr === '-' || dateStr === 'null' || dateStr === '') return '-';
+            if (dateStr.includes('/')) {
+                let parts = dateStr.split('/');
+                if (parts.length === 3) {
+                    return `${parts[1].padStart(2, '0')}/${parts[0].padStart(2, '0')}/${parts[2]}`;
+                }
+            }
+            let parts = dateStr.split('-');
+            if (parts.length === 3) {
+                return `${parts[2]}/${parts[1]}/${parts[0]}`;
+            }
+            return dateStr;
+        }
+
+        function getAdjustedRound(roundValue) {
+            if (roundValue > 120000) {
+                let rem = (roundValue - 120000) % 120000;
+                return rem === 0 ? 120000 : rem;
+            }
+            return roundValue;
+        }
+
+        function getDaysInCurrentMonth(date = new Date()) {
+            return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+        }
+
+        // ----------------------------------------------------
+        // โหลดข้อมูลเริ่มต้นและสร้างตาราง
+        // ----------------------------------------------------
+        $(document).ready(async function () {
+            let initialVehicles = [];
+            historyData = {};
+
+            const creds = getSupabaseCredentials();
+
+            if (!creds || !creds.url || !creds.anonKey) {
+                updateSupabaseStatusBadge(false);
+                // แสดงตารางว่างพร้อมแจ้งเตือน
+                renderEmptyTable("ยังไม่ได้ตั้งค่าการเชื่อมต่อ Supabase Database กรุณาคลิกปุ่ม 'ตั้งค่า Supabase' ด้านบน");
+                return;
+            }
+
+            try {
+                supabaseClient = window.supabase.createClient(creds.url, creds.anonKey);
+                updateSupabaseStatusBadge(true, creds.url);
+
+                // ดึงข้อมูล vehicles และ histories พร้อมกัน
+                const [vehiclesResponse, historiesResponse] = await Promise.all([
+                    supabaseClient.from('vehicles').select('*').order('id', { ascending: true }),
+                    supabaseClient.from('histories').select('*').order('log_id', { ascending: true })
+                ]);
+
+                if (vehiclesResponse.error) throw vehiclesResponse.error;
+                if (historiesResponse.error) throw historiesResponse.error;
+
+                initialVehicles = vehiclesResponse.data || [];
+
+                if (historiesResponse.data) {
+                    historiesResponse.data.forEach(h => {
+                        if (!historyData[h.id]) historyData[h.id] = [];
+                        historyData[h.id].push(h);
+                    });
+                }
+
+            } catch (error) {
+                console.error("ไม่สามารถดึงข้อมูลรถจาก Supabase ได้:", error);
+                updateSupabaseStatusBadge(false);
+                renderEmptyTable(`ไม่สามารถโหลดข้อมูลจาก Supabase ได้: ${error.message || error}`);
+                return;
+            }
+
+            let tableRowsHtml = "";
+            initialVehicles.forEach((v) => {
+                let totalRun = Math.abs((v.prev || 0) - (v.current || 0));
+                let daysInMonth = 30;
+                let kmPerDay = totalRun > 0 ? Math.round(totalRun / daysInMonth) : 0;
+                let nextServiceMileage = (v.lastKm || 0) + (v.interval || 20000);
+                let remainingKm = nextServiceMileage - (v.current || 0);
+
+                let adjustedLastRound = getAdjustedRound(v.lastRound || 0);
+                let adjustedNextRound = getAdjustedRound(v.nextRound || 0);
+
+                let reqDateFormatted = formatDateToDMY(v.reqDate);
+                let servDateFormatted = (!v.servDate || v.servDate === '-') ? '-' : formatDateToDMY(v.servDate);
+                let nextDateFormatted = formatDateToDMY(v.nextDate);
+
+                tableRowsHtml += `
+                    <tr data-id="${v.id}" data-num="${v.num}" data-plate="${v.plate}" data-interval="${v.interval}" data-lastkm="${v.lastKm}" data-lastround="${v.lastRound}" data-nextround="${v.nextRound}" data-servdate="${v.servDate || '-'}" data-oldcurrent="${v.current || 0}">
+                        <td class="px-2 py-2 border details-control">+</td>
+                        <td class="px-2 py-2 border hidden">${v.id}</td>
+                        <td class="px-2 py-2 border vehicle-num">${v.num}</td>
+                        <td class="px-2 py-2 border font-medium vehicle-plate">${v.plate}</td>
+                        <td class="px-2 py-2 border bg-yellow-50">
+                            <input type="number" class="current-mileage w-24 text-center border rounded p-1 text-red-600 font-bold outline-none" value="${v.current}" oninput="syncTableData(this)">
+                        </td>
+                        <td class="px-2 py-2 border service-interval">${(v.interval || 20000).toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-orange-50 remaining-km font-semibold ${remainingKm < 0 ? 'text-red-600 font-bold' : ''}">${remainingKm.toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-blue-50 prev-mileage font-semibold text-blue-600">${(v.prev || 0).toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-gray-50 total-run font-semibold text-red-600">${totalRun.toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-gray-50 km-per-day font-semibold text-red-600">${kmPerDay.toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-gray-50 days-to-service font-semibold text-red-600">${(kmPerDay > 0 ? Math.round(remainingKm / kmPerDay) : 0).toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-green-50 request-date font-semibold">${reqDateFormatted}</td>
+                        <td class="px-2 py-2 border bg-indigo-50 update-timestamp font-semibold text-indigo-700">${v.updateTimestamp || '-'}</td>
+                        <td class="px-2 py-2 border last-service-km">${(v.lastKm || 0).toLocaleString()}</td>
+                        <td class="px-2 py-2 border service-date">${servDateFormatted}</td>
+                        <td class="px-2 py-2 border last-service-round">${adjustedLastRound.toLocaleString()}</td>
+                        <td class="px-2 py-2 border last-service-next font-semibold">${nextServiceMileage.toLocaleString()}</td>
+                        <td class="px-2 py-2 border next-service-round">${adjustedNextRound.toLocaleString()}</td>
+                        <td class="px-2 py-2 border bg-purple-50 next-service-date font-semibold text-purple-700">${nextDateFormatted}</td>
+                        <td class="px-2 py-2 border bg-pink-50"><input type="text" class="row-detail w-28 text-center border rounded p-1 outline-none" value="" placeholder="ระบุรายละเอียด"></td>
+                        <td class="px-2 py-2 border bg-teal-50"><input type="checkbox" class="row-done w-4 h-4 accent-teal-600 cursor-pointer"></td>
+                        <td class="px-2 py-2 border"><button type="button" onclick="editRow(this)" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-xs transition shadow">แก้ไข</button></td>
+                    </tr>
+                `;
+            });
+
+            $('#tableBody').html(tableRowsHtml);
+
+            dataTable = $('#vehicleTable').DataTable({
+                "pageLength": 15,
+                "order": [[2, "asc"]]
+            });
+
+            $('#vehicleTable tbody').on('click', 'tr', function (e) {
+                if ($(this).hasClass('inserted-header-row') || $(this).hasClass('child')) return;
+
+                if ($(this).prev().hasClass('inserted-header-row')) {
+                    $(this).prev().remove();
+                    $(this).removeClass('bg-blue-50');
+                    return;
+                }
+
+                $('.inserted-header-row').remove();
+                $('#vehicleTable tbody tr').removeClass('bg-blue-50');
+
+                $(this).addClass('bg-blue-50');
+
+                let headerCols = [];
+                $('#vehicleTable thead tr th').each(function () {
+                    if (!$(this).hasClass('hidden')) {
+                        headerCols.push(`<th class="px-2 py-1 border font-bold text-blue-800 bg-blue-100">${$(this).text()}</th>`);
+                    }
+                });
+
+                let insertedHtml = `<tr class="inserted-header-row">${headerCols.join('')}</tr>`;
+                $(this).before(insertedHtml);
+            });
+
+            $('#vehicleTable tbody').on('click', 'td.details-control', function (e) {
+                e.stopPropagation();
+                var tr = $(this).closest('tr');
+                var row = dataTable.row(tr);
+                var vehicleId = tr.attr('data-id');
+
+                if (row.child.isShown()) {
+                    row.child.hide();
+                    tr.removeClass('shown');
+                    $(this).text('+');
+                } else {
+                    row.child(formatHistory(vehicleId)).show();
+                    tr.addClass('shown');
+                    $(this).text('-');
+                }
+            });
+
+            renderTopLowest();
+            renderRecentUpdated();
+        });
+
+        function renderEmptyTable(message) {
+            $('#tableBody').html(`<tr><td colspan="22" class="p-8 text-center text-gray-500 font-semibold">${message}</td></tr>`);
+            dataTable = $('#vehicleTable').DataTable({ "pageLength": 15 });
+            document.getElementById('topLowestBody').innerHTML = `<tr><td colspan="8" class="p-4 text-center text-gray-400">${message}</td></tr>`;
+            document.getElementById('recentUpdatedBody').innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-400">${message}</td></tr>`;
+        }
+
+        // ----------------------------------------------------
+        // ฟังก์ชันควบคุม Pop-up นำเข้าชุดข้อมูล (Bulk Update)
+        // ----------------------------------------------------
+        function openBulkPopup() {
+            document.getElementById('bulkPopupModal').classList.remove('hidden');
+        }
+
+        function closeBulkPopup() {
+            document.getElementById('bulkPopupModal').classList.add('hidden');
+        }
+
+        function processBulkImport() {
+            let rawText = document.getElementById('bulkDataInput').value.trim();
+            if (!rawText) {
+                alert('กรุณาวางข้อมูลชุดที่ต้องการนำเข้าก่อน');
+                return;
+            }
+
+            let lines = rawText.split('\n');
+            parsedBulkData = [];
+
+            lines.forEach(line => {
+                let cols = line.trim().split(/\t|,|\s+/);
+                if (cols.length >= 3) {
+                    let num = cols[0].trim();
+                    let plate = cols[1].trim();
+                    let newKm = parseInt(cols[2].trim()) || 0;
+
+                    parsedBulkData.push({ num, plate, newKm });
+                }
+            });
+
+            if (parsedBulkData.length === 0) {
+                alert('ไม่พบรูปแบบข้อมูลที่ถูกต้อง (ต้องมี เบอร์, ทะเบียน, เลขไมล์)');
+                return;
+            }
+
+            closeBulkPopup();
+            document.getElementById('bulkModalSummary').textContent = `ตรวจพบข้อมูลทั้งหมด ${parsedBulkData.length} รายการ พร้อมค้นหาจากทะเบียนและเบอร์เพื่ออัพเดต`;
+            document.getElementById('bulkModal').classList.remove('hidden');
+        }
+
+        function closeBulkModal() {
+            document.getElementById('bulkModal').classList.add('hidden');
+        }
+
+        async function executeBulkImport() {
+            if (!supabaseClient) {
+                alert('กรุณาเชื่อมต่อ Supabase ก่อนนำเข้าข้อมูล');
+                openSupabaseModal();
+                return;
+            }
+
+            closeBulkModal();
+            let successCount = 0;
+            const now = new Date();
+            const formattedRequestDate = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+            const formattedTimestamp = `${formattedRequestDate} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            for (let item of parsedBulkData) {
+                let foundTr = null;
+
+                dataTable.rows().every(function () {
+                    let tr = $(this.node());
+                    let rowNum = tr.find('.vehicle-num').text().trim();
+                    let rowPlate = tr.find('.vehicle-plate').text().trim();
+
+                    if (rowNum === item.num || rowPlate === item.plate) {
+                        foundTr = tr;
+                    }
+                });
+
+                if (foundTr) {
+                    let vehicleId = parseInt(foundTr.attr('data-id'));
+                    let serviceInterval = parseInt(foundTr.attr('data-interval')) || 20000;
+                    let oldCurrentMileage = parseInt(foundTr.attr('data-oldcurrent')) || item.newKm;
+                    let lastServiceKm = parseInt(foundTr.find('.last-service-km').text().replace(/,/g, '')) || item.newKm;
+                    let lastRoundVal = parseInt(foundTr.attr('data-lastround')) || 0;
+                    let nextRoundVal = parseInt(foundTr.attr('data-nextround')) || 0;
+
+                    const totalRun = Math.abs(oldCurrentMileage - item.newKm);
+                    const daysInMonth = getDaysInCurrentMonth(now);
+                    const kmPerDay = totalRun > 0 ? Math.round(totalRun / daysInMonth) : 0;
+                    const nextServiceMileage = lastServiceKm + serviceInterval;
+                    let remainingKm = nextServiceMileage - item.newKm;
+
+                    let daysToService = kmPerDay > 0 ? Math.round(remainingKm / kmPerDay) : 0;
+                    let nextDate = new Date(now);
+                    nextDate.setDate(nextDate.getDate() + daysToService);
+                    const formattedNextDate = `${String(nextDate.getDate()).padStart(2, '0')}/${String(nextDate.getMonth() + 1).padStart(2, '0')}/${nextDate.getFullYear()}`;
+
+                    const updatePayload = {
+                        id: vehicleId,
+                        num: item.num,
+                        plate: item.plate,
+                        current: item.newKm,
+                        interval: serviceInterval,
+                        lastKm: lastServiceKm,
+                        prev: oldCurrentMileage,
+                        reqDate: formattedRequestDate,
+                        updateTimestamp: formattedTimestamp,
+                        servDate: '-',
+                        lastRound: lastRoundVal,
+                        nextRound: nextRoundVal,
+                        nextDate: formattedNextDate,
+                        detail: 'นำเข้าข้อมูลชุด (Bulk)',
+                        status: '❌ ยังไม่ทำ'
+                    };
+
+                    try {
+                        // 1. อัพเดตตาราง vehicles
+                        const { error: vErr } = await supabaseClient
+                            .from('vehicles')
+                            .update({
+                                num: updatePayload.num,
+                                plate: updatePayload.plate,
+                                current: updatePayload.current,
+                                interval: updatePayload.interval,
+                                lastKm: updatePayload.lastKm,
+                                prev: updatePayload.prev,
+                                reqDate: updatePayload.reqDate,
+                                updateTimestamp: updatePayload.updateTimestamp,
+                                servDate: updatePayload.servDate,
+                                lastRound: updatePayload.lastRound,
+                                nextRound: updatePayload.nextRound,
+                                nextDate: updatePayload.nextDate,
+                                detail: updatePayload.detail,
+                                status: updatePayload.status
+                            })
+                            .eq('id', vehicleId);
+
+                        if (vErr) throw vErr;
+
+                        // 2. บันทึกลงตาราง histories
+                        const { error: hErr } = await supabaseClient
+                            .from('histories')
+                            .insert([{
+                                id: updatePayload.id,
+                                num: updatePayload.num,
+                                plate: updatePayload.plate,
+                                current: updatePayload.current,
+                                interval: updatePayload.interval,
+                                lastKm: updatePayload.lastKm,
+                                prev: updatePayload.prev,
+                                reqDate: updatePayload.reqDate,
+                                updateTimestamp: updatePayload.updateTimestamp,
+                                servDate: updatePayload.servDate,
+                                lastRound: updatePayload.lastRound,
+                                nextRound: updatePayload.nextRound,
+                                nextDate: updatePayload.nextDate,
+                                detail: updatePayload.detail,
+                                status: updatePayload.status
+                            }]);
+
+                        if (hErr) throw hErr;
+
+                        successCount++;
+                    } catch (err) {
+                        console.error("Error updating vehicle ID via Supabase:", vehicleId, err);
+                    }
+                }
+            }
+
+            alert(`นำเข้าข้อมูลสำเร็จ ${successCount} จาก ${parsedBulkData.length} รายการ!`);
+            location.reload();
+        }
+
+        // ----------------------------------------------------
+        // คำนวณเลขไมล์และแสดงผลในตาราง
+        // ----------------------------------------------------
+        function syncTableData(input) {
+            let tr = $(input).closest('tr');
+            let currentVal = parseInt(input.value) || 0;
+            let lastKm = parseInt(tr.find('.last-service-km').text().replace(/,/g, '')) || 0;
+            let interval = parseInt(tr.find('.service-interval').text().replace(/,/g, '')) || 20000;
+
+            let oldCurrent = parseInt(tr.attr('data-oldcurrent')) || 0;
+            tr.find('.prev-mileage').text(oldCurrent.toLocaleString());
+
+            let totalRun = Math.abs(oldCurrent - currentVal);
+            let remainingKm = (lastKm + interval) - currentVal;
+
+            tr.find('.total-run').text(totalRun.toLocaleString());
+            let remainingCell = tr.find('.remaining-km');
+            remainingCell.text(remainingKm.toLocaleString());
+            if (remainingKm < 0) {
+                remainingCell.addClass('text-red-600 font-bold');
+            } else {
+                remainingCell.removeClass('text-red-600 font-bold');
+            }
+
+            renderTopLowest();
+        }
+
+        function renderTopLowest() {
+            let limitVal = document.getElementById('topCount').value;
+            let rows = [];
+
+            if (!dataTable) return;
+
+            dataTable.rows().every(function () {
+                let tr = $(this.node());
+                let vehicleId = tr.attr('data-id');
+                let num = tr.find('.vehicle-num').text().trim();
+                let plate = tr.find('.vehicle-plate').text().trim();
+                let remainingText = tr.find('.remaining-km').text().replace(/,/g, '').trim();
+                let remaining = parseInt(remainingText) || 0;
+                let nextServiceMileage = tr.find('.last-service-next').text().trim();
+                let nextRound = tr.find('.next-service-round').text().trim();
+                let nextDate = tr.find('.next-service-date').text().trim();
+                let currentVal = tr.find('.current-mileage').val();
+
+                if (remaining < 4000) {
+                    rows.push({
+                        vehicleId, num, plate, remaining, nextServiceMileage, nextRound, nextDate, currentVal
+                    });
+                }
+            });
+
+            rows.sort((a, b) => a.remaining - b.remaining);
+
+            let limit = limitVal === 'all' ? rows.length : parseInt(limitVal);
+            let topRows = rows.slice(0, limit);
+
+            let html = '';
+            if (topRows.length === 0) {
+                html = '<tr><td colspan="8" class="py-3 text-gray-500">ไม่มีรถที่เหลือระยะทางต่ำกว่า 4,000 กม.</td></tr>';
+            } else {
+                topRows.forEach((r, idx) => {
+                    let isNegative = r.remaining < 0;
+                    html += `<tr>
+                        <td class="px-3 py-2 border font-bold">${idx + 1}</td>
+                        <td class="px-3 py-2 border flex items-center justify-center space-x-2">
+                            <span class="font-bold">${r.num}</span>
+                            <label class="flex items-center space-x-1 text-teal-700 text-[10px] cursor-pointer bg-teal-50 px-1 py-0.5 rounded border border-teal-200">
+                                <input type="checkbox" id="quick-done-${r.vehicleId}" class="w-3 h-3 accent-teal-600">
+                                <span>ทำแล้ว</span>
+                            </label>
+                        </td>
+                        <td class="px-3 py-2 border font-medium">${r.plate}</td>
+                        <td class="px-3 py-2 border font-bold ${isNegative ? 'text-red-600 bg-red-50' : 'text-orange-600'}">${r.remaining.toLocaleString()} กม.</td>
+                        <td class="px-3 py-2 border">${r.nextServiceMileage}</td>
+                        <td class="px-3 py-2 border">${r.nextRound}</td>
+                        <td class="px-3 py-2 border font-semibold text-purple-700 bg-purple-50">${r.nextDate}</td>
+                        <td class="px-3 py-2 border">
+                            <button type="button" onclick="handleQuickSave('${r.vehicleId}', '${r.currentVal}')" class="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded text-xs shadow transition">Save</button>
+                        </td>
+                    </tr>`;
+                });
+            }
+
+            document.getElementById('topLowestBody').innerHTML = html;
+        }
+
+        function handleQuickSave(vehicleId, currentVal) {
+            let checkbox = document.getElementById(`quick-done-${vehicleId}`);
+            if (!checkbox || !checkbox.checked) {
+                alert('กรุณาติ๊กเครื่องหมายถูกที่ช่อง "ทำแล้ว" ก่อนทำการ Save');
+                return;
+            }
+
+            currentQuickVehicleId = vehicleId;
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+
+            document.getElementById('quickServiceDateInput').value = `${year}-${month}-${day}`;
+            document.getElementById('quickServiceKmInput').value = currentVal;
+            document.getElementById('quickServiceModal').classList.remove('hidden');
+        }
+
+        function closeQuickModal() {
+            document.getElementById('quickServiceModal').classList.add('hidden');
+            currentQuickVehicleId = null;
+        }
+
+        async function confirmQuickService() {
+            if (!currentQuickVehicleId) return;
+
+            if (!supabaseClient) {
+                alert('กรุณาเชื่อมต่อ Supabase ก่อนบันทึกข้อมูล');
+                openSupabaseModal();
+                return;
+            }
+
+            const selectedDateStr = document.getElementById('quickServiceDateInput').value;
+            const newLastKm = parseInt(document.getElementById('quickServiceKmInput').value) || 0;
+
+            if (!selectedDateStr) {
+                alert('กรุณาเลือกวันที่เช็คระยะ');
+                return;
+            }
+
+            const parts = selectedDateStr.split('-');
+            const selectedDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+            const formattedRequestDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+            const now = new Date();
+            const formattedTimestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            let targetTr = null;
+            let vehicleNum = "";
+            let vehiclePlate = "";
+            let serviceInterval = 20000;
+            let oldCurrentMileage = 0;
+            let currentNextRound = 0;
+
+            dataTable.rows().every(function () {
+                let tr = $(this.node());
+                if (tr.attr('data-id') === String(currentQuickVehicleId)) {
+                    targetTr = tr;
+                }
+            });
+
+            if (targetTr) {
+                vehicleNum = targetTr.find('.vehicle-num').text().trim();
+                vehiclePlate = targetTr.find('.vehicle-plate').text().trim();
+                serviceInterval = parseInt(targetTr.attr('data-interval')) || 20000;
+                oldCurrentMileage = parseInt(targetTr.attr('data-oldcurrent')) || newLastKm;
+                currentNextRound = parseInt(targetTr.attr('data-nextround')) || 0;
+            } else {
+                vehicleNum = "1";
+                vehiclePlate = "-";
+            }
+
+            let newLastRound = currentNextRound > 0 ? currentNextRound : newLastKm;
+            let calculatedNextRound = newLastRound + 20000;
+            if (calculatedNextRound > 120000) {
+                calculatedNextRound = 20000;
+            }
+
+            const totalRun = Math.abs(oldCurrentMileage - newLastKm);
+            const daysInMonth = getDaysInCurrentMonth(selectedDateObj);
+            const kmPerDay = totalRun > 0 ? Math.round(totalRun / daysInMonth) : 0;
+            const nextServiceMileage = newLastKm + serviceInterval;
+            let remainingKm = nextServiceMileage - newLastKm;
+
+            let daysToService = 0;
+            if (kmPerDay > 0) {
+                daysToService = Math.round(remainingKm / kmPerDay);
+            }
+
+            let nextDate = new Date(selectedDateObj);
+            nextDate.setDate(nextDate.getDate() + daysToService);
+            const formattedNextDate = `${String(nextDate.getDate()).padStart(2, '0')}/${String(nextDate.getMonth() + 1).padStart(2, '0')}/${nextDate.getFullYear()}`;
+
+            const updatePayload = {
+                id: parseInt(currentQuickVehicleId),
+                num: vehicleNum,
+                plate: vehiclePlate,
+                current: newLastKm,
+                interval: serviceInterval,
+                lastKm: newLastKm,
+                prev: oldCurrentMileage,
+                reqDate: formattedRequestDate,
+                updateTimestamp: formattedTimestamp,
+                servDate: formattedRequestDate,
+                lastRound: newLastRound,
+                nextRound: calculatedNextRound,
+                nextDate: formattedNextDate,
+                detail: 'เช็คระยะด่วน',
+                status: '✔️ ทำแล้ว'
+            };
+
+            try {
+                // 1. อัพเดต vehicles
+                const { error: vErr } = await supabaseClient
+                    .from('vehicles')
+                    .update({
+                        num: updatePayload.num,
+                        plate: updatePayload.plate,
+                        current: updatePayload.current,
+                        interval: updatePayload.interval,
+                        lastKm: updatePayload.lastKm,
+                        prev: updatePayload.prev,
+                        reqDate: updatePayload.reqDate,
+                        updateTimestamp: updatePayload.updateTimestamp,
+                        servDate: updatePayload.servDate,
+                        lastRound: updatePayload.lastRound,
+                        nextRound: updatePayload.nextRound,
+                        nextDate: updatePayload.nextDate,
+                        detail: updatePayload.detail,
+                        status: updatePayload.status
+                    })
+                    .eq('id', updatePayload.id);
+
+                if (vErr) throw vErr;
+
+                // 2. เพิ่ม histories
+                const { error: hErr } = await supabaseClient
+                    .from('histories')
+                    .insert([{
+                        id: updatePayload.id,
+                        num: updatePayload.num,
+                        plate: updatePayload.plate,
+                        current: updatePayload.current,
+                        interval: updatePayload.interval,
+                        lastKm: updatePayload.lastKm,
+                        prev: updatePayload.prev,
+                        reqDate: updatePayload.reqDate,
+                        updateTimestamp: updatePayload.updateTimestamp,
+                        servDate: updatePayload.servDate,
+                        lastRound: updatePayload.lastRound,
+                        nextRound: updatePayload.nextRound,
+                        nextDate: updatePayload.nextDate,
+                        detail: updatePayload.detail,
+                        status: updatePayload.status
+                    }]);
+
+                if (hErr) throw hErr;
+
+                closeQuickModal();
+                alert('บันทึกการเช็คระยะและอัพเดตเลขไมล์ลง Supabase เรียบร้อยแล้ว!');
+                location.reload();
+
+            } catch (error) {
+                console.error("Supabase Quick Service Error:", error);
+                alert(`เกิดข้อผิดพลาดในการบันทึกข้อมูล: ${error.message || error}`);
+            }
+        }
+
+        function renderRecentUpdated() {
+            let limitVal = document.getElementById('recentCount').value;
+            let rows = [];
+
+            if (!dataTable) return;
+
+            dataTable.rows().every(function () {
+                let tr = $(this.node());
+                let vehicleId = tr.attr('data-id');
+                let num = tr.find('.vehicle-num').text().trim();
+                let plate = tr.find('.vehicle-plate').text().trim();
+                let current = parseInt(tr.find('.current-mileage').val()) || 0;
+                let prev = parseInt(tr.find('.prev-mileage').text().replace(/,/g, '')) || 0;
+                let reqDate = tr.find('.request-date').text().trim();
+                let updateTimestamp = tr.find('.update-timestamp').text().trim();
+                let lastKmVal = tr.find('.last-service-km').text().trim();
+                let servDate = tr.find('.service-date').text().trim();
+                let detail = tr.find('.row-detail').val().trim() || '-';
+                let isChecked = tr.find('.row-done').prop('checked');
+                let status = isChecked ? '✔️ ทำแล้ว' : '❌ ยังไม่ทำ';
+
+                let histories = historyData[vehicleId];
+                let mileageChangeText = `ไมล์เก่า ${prev.toLocaleString()} ➔ ไมล์ใหม่ ${current.toLocaleString()}`;
+                if (histories && histories.length > 0) {
+                    let lastLog = histories[histories.length - 1];
+                    let oldMile = lastLog.prev || prev;
+                    let newMile = lastLog.current || current;
+                    mileageChangeText = `ไมล์เดิม ${parseInt(oldMile).toLocaleString()} ➔ ไมล์อัพเดต ${parseInt(newMile).toLocaleString()}`;
+                }
+
+                if (isChecked) {
+                    mileageChangeText += ` <span class="text-green-600 font-bold">(เข้าทำเช็คระยะแล้ว)</span>`;
+                }
+
+                if (updateTimestamp && updateTimestamp !== '-') {
+                    rows.push({
+                        num, plate, mileageChangeText, reqDate, updateTimestamp, lastKmVal, servDate, detail, status
+                    });
+                }
+            });
+
+            rows.reverse();
+
+            let limit = limitVal === 'all' ? rows.length : parseInt(limitVal);
+            let recentRows = rows.slice(0, limit);
+
+            let html = '';
+            if (recentRows.length === 0) {
+                html = '<tr><td colspan="10" class="py-3 text-gray-500">ยังไม่มีรถที่ได้รับการอัพเดทในระบบ</td></tr>';
+            } else {
+                recentRows.forEach((r, idx) => {
+                    html += `<tr>
+                        <td class="px-3 py-2 border font-bold">${idx + 1}</td>
+                        <td class="px-3 py-2 border">${r.num}</td>
+                        <td class="px-3 py-2 border font-medium">${r.plate}</td>
+                        <td class="px-3 py-2 border bg-yellow-50 font-semibold text-blue-700">${r.mileageChangeText}</td>
+                        <td class="px-3 py-2 border">${r.reqDate}</td>
+                        <td class="px-3 py-2 border font-semibold text-indigo-700 bg-indigo-50">${r.updateTimestamp}</td>
+                        <td class="px-3 py-2 border font-semibold text-orange-600">${r.lastKmVal}</td>
+                        <td class="px-3 py-2 border">${r.servDate}</td>
+                        <td class="px-3 py-2 border">${r.detail}</td>
+                        <td class="px-3 py-2 border">${r.status}</td>
+                    </tr>`;
+                });
+            }
+
+            document.getElementById('recentUpdatedBody').innerHTML = html;
+        }
+
+        function formatHistory(vehicleId) {
+            let histories = historyData[vehicleId];
+            if (!histories || histories.length === 0) {
+                return '<div class="p-3 bg-gray-50 text-gray-500 text-center">ยังไม่มีประวัติข้อมูลเก่า</div>';
+            }
+
+            let html = '<div class="p-3 bg-blue-50 border border-blue-200 rounded overflow-x-auto"><h4 class="font-bold text-blue-700 mb-2 text-left">📜 ประวัติข้อมูลเก่าทั้งหมด (Tree View):</h4>';
+            html += '<table class="min-w-full divide-y divide-blue-200 text-xs bg-white text-center border">';
+            html += '<thead class="bg-blue-100 text-blue-900 font-semibold"><tr>' +
+                '<th class="p-1 border">Log ID</th>' +
+                '<th class="p-1 border hidden">ID</th>' +
+                '<th class="p-1 border">เบอร์</th>' +
+                '<th class="p-1 border">ทะเบียน</th>' +
+                '<th class="p-1 border bg-yellow-50">เลขไมล์ปัจจุบัน</th>' +
+                '<th class="p-1 border">รอบเช็คระยะ</th>' +
+                '<th class="p-1 border bg-orange-50">เหลือ (คำนวณ)</th>' +
+                '<th class="p-1 border bg-blue-50">เลขไมล์เดือนก่อน</th>' +
+                '<th class="p-1 border bg-gray-100">รวมระยะทางที่วิ่งต่อเดือน</th>' +
+                '<th class="p-1 border bg-gray-100">ระยะทางที่วิ่ง กม./ต่อวัน</th>' +
+                '<th class="p-1 border bg-gray-100">นับจากวันคงเหลือเข้าเช็คระยะ/วัน</th>' +
+                '<th class="p-1 border bg-green-50">วันที่ขอเลขไมล์</th>' +
+                '<th class="p-1 border bg-indigo-50">วันที่/เวลาอัพเดต</th>' +
+                '<th class="p-1 border">เลขไมล์เช็คระยะล่าสุด</th>' +
+                '<th class="p-1 border">วันที่เช็คระยะ</th>' +
+                '<th class="p-1 border">รอบเช็คระยะครั้งล่าสุด</th>' +
+                '<th class="p-1 border">เลขไมล์เข้าเช็คระยะครั้งต่อไป</th>' +
+                '<th class="p-1 border">รอบเช็คระยะครั้งต่อไป</th>' +
+                '<th class="p-1 border bg-purple-50">วันที่เข้ารอบต่อไป</th>' +
+                '<th class="p-1 border bg-pink-50">รายละเอียด</th>' +
+                '<th class="p-1 border bg-teal-50">สถานะ (ทำแล้ว)</th>' +
+                '<th class="p-1 border">จัดการ</th>' +
+                '</tr></thead><tbody>';
+
+            [...histories].reverse().forEach((h, idx) => {
+                let currentVal = h.current || 0;
+                let prevVal = h.prev || 0;
+                let lastKmVal = h.lastKm || 0;
+                let intervalVal = h.interval || 20000;
+
+                let totalRun = Math.abs(prevVal - currentVal);
+                let daysInMonth = 30;
+                let kmPerDay = totalRun > 0 ? Math.round(totalRun / daysInMonth) : 0;
+                let nextServiceMileage = lastKmVal + intervalVal;
+                let remainingKm = nextServiceMileage - currentVal;
+                let daysToService = kmPerDay > 0 ? Math.round(remainingKm / kmPerDay) : 0;
+
+                let adjustedLastRound = getAdjustedRound(h.lastRound || 0);
+                let adjustedNextRound = getAdjustedRound(h.nextRound || 0);
+                let historyServDate = (!h.servDate || h.servDate === '-') ? '-' : formatDateToDMY(h.servDate);
+
+                html += `<tr>
+                    <td class="p-1 border font-bold text-indigo-600">${h.log_id || '-'}</td>
+                    <td class="p-1 border hidden">${h.id || '-'}</td>
+                    <td class="p-1 border">${h.num || '-'}</td>
+                    <td class="p-1 border font-medium">${h.plate || '-'}</td>
+                    <td class="p-1 border bg-yellow-50 text-red-600 font-semibold">${currentVal.toLocaleString()}</td>
+                    <td class="p-1 border">${intervalVal.toLocaleString()}</td>
+                    <td class="p-1 border bg-orange-50 font-semibold ${remainingKm < 0 ? 'text-red-600 font-bold' : ''}">${remainingKm.toLocaleString()}</td>
+                    <td class="p-1 border bg-blue-50 font-semibold text-blue-600">${prevVal.toLocaleString()}</td>
+                    <td class="p-1 border bg-gray-50 font-semibold text-red-600">${totalRun.toLocaleString()}</td>
+                    <td class="p-1 border bg-gray-50 font-semibold text-red-600">${kmPerDay.toLocaleString()}</td>
+                    <td class="p-1 border bg-gray-50 font-semibold text-red-600">${daysToService.toLocaleString()}</td>
+                    <td class="p-1 border bg-green-50 font-semibold">${formatDateToDMY(h.reqDate)}</td>
+                    <td class="p-1 border bg-indigo-50 font-semibold text-indigo-700">${h.updateTimestamp || '-'}</td>
+                    <td class="p-1 border">${lastKmVal.toLocaleString()}</td>
+                    <td class="p-1 border">${historyServDate}</td>
+                    <td class="p-1 border">${adjustedLastRound.toLocaleString()}</td>
+                    <td class="p-1 border font-semibold">${nextServiceMileage.toLocaleString()}</td>
+                    <td class="p-1 border">${adjustedNextRound.toLocaleString()}</td>
+                    <td class="p-1 border bg-purple-50 font-semibold text-purple-700">${formatDateToDMY(h.nextDate)}</td>
+                    <td class="p-1 border bg-pink-50">${h.detail || '-'}</td>
+                    <td class="p-1 border bg-teal-50">${h.status || '-'}</td>
+                    <td class="p-1 border"><button type="button" onclick="deleteHistory(${h.log_id}, ${h.id})" class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs transition shadow">ลบ</button></td>
+                </tr>`;
+            });
+
+            html += '</tbody></table></div>';
+            return html;
+        }
+
+        // ----------------------------------------------------
+        // ฟังก์ชันแก้ไขข้อมูลรถ (Modal & Save to Supabase)
+        // ----------------------------------------------------
+        function editRow(button) {
+            currentButton = button;
+            const now = new Date();
+            let rowNode = button.closest('tr');
+            let isChecked = rowNode.querySelector('.row-done').checked;
+
+            if (isChecked) {
+                document.getElementById('modalTitle').textContent = "เลือกวันที่เช็คระยะ (ทำแล้ว)";
+                document.getElementById('modalDesc').textContent = "ระบุวันที่นำรถเข้าเช็คระยะ (DD/MM/YYYY):";
+            } else {
+                document.getElementById('modalTitle').textContent = "เลือกวันที่ขอเลขไมล์";
+                document.getElementById('modalDesc').textContent = "เลือกวันที่ต้องการ (DD/MM/YYYY):";
+            }
+
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+
+            document.getElementById('modalDateInput').value = `${year}-${month}-${day}`;
+            document.getElementById('dateModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('dateModal').classList.add('hidden');
+        }
+
+        async function confirmUpdate() {
+            if (!currentButton) return;
+
+            if (!supabaseClient) {
+                alert('กรุณาเชื่อมต่อ Supabase ก่อนบันทึกข้อมูล');
+                openSupabaseModal();
+                return;
+            }
+
+            const selectedDateStr = document.getElementById('modalDateInput').value;
+            if (!selectedDateStr) {
+                alert('กรุณาเลือกวันที่');
+                return;
+            }
+
+            const parts = selectedDateStr.split('-');
+            const selectedDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+            const formattedRequestDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+
+            const now = new Date();
+            const formattedTimestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            const rowNode = currentButton.closest('tr');
+            closeModal();
+
+            if (!rowNode) return;
+
+            const vehicleId = parseInt(rowNode.getAttribute('data-id')) || 1;
+            const mileageInput = rowNode.querySelector('.current-mileage');
+
+            const serviceIntervalCell = rowNode.querySelector('.service-interval');
+            const detailInput = rowNode.querySelector('.row-detail');
+            const doneCheckbox = rowNode.querySelector('.row-done');
+
+            const newMileageValue = parseInt(mileageInput ? mileageInput.value : 0) || 0;
+            const oldCurrentMileage = parseInt(rowNode.getAttribute('data-oldcurrent')) || newMileageValue;
+            let serviceInterval = parseInt(serviceIntervalCell ? serviceIntervalCell.textContent.replace(/,/g, '') : 20000) || 20000;
+            let isChecked = doneCheckbox && doneCheckbox.checked;
+
+            let lastServiceKm = isChecked ? newMileageValue : (parseInt(rowNode.querySelector('.last-service-km').textContent.replace(/,/g, '')) || newMileageValue);
+            let formattedServDate = '-';
+            let currentNextRound = parseInt(rowNode.getAttribute('data-nextround')) || 0;
+            let lastRoundVal = parseInt(rowNode.getAttribute('data-lastround')) || 0;
+            let nextRoundVal = currentNextRound;
+
+            if (isChecked) {
+                formattedServDate = formattedRequestDate;
+                lastRoundVal = currentNextRound > 0 ? currentNextRound : newMileageValue;
+                nextRoundVal = lastRoundVal + 20000;
+                if (nextRoundVal > 120000) {
+                    nextRoundVal = 20000;
+                }
+            }
+
+            const totalRun = Math.abs(oldCurrentMileage - newMileageValue);
+            const daysInMonth = getDaysInCurrentMonth(selectedDateObj);
+            const kmPerDay = totalRun > 0 ? Math.round(totalRun / daysInMonth) : 0;
+            const nextServiceMileage = lastServiceKm + serviceInterval;
+            let remainingKm = nextServiceMileage - newMileageValue;
+
+            let daysToService = 0;
+            if (kmPerDay > 0) {
+                daysToService = Math.round(remainingKm / kmPerDay);
+            }
+
+            let nextDate = new Date(selectedDateObj);
+            nextDate.setDate(nextDate.getDate() + daysToService);
+            const formattedNextDate = `${String(nextDate.getDate()).padStart(2, '0')}/${String(nextDate.getMonth() + 1).padStart(2, '0')}/${nextDate.getFullYear()}`;
+
+            const updatePayload = {
+                id: vehicleId,
+                num: rowNode.querySelector('.vehicle-num').textContent.trim(),
+                plate: rowNode.querySelector('.vehicle-plate').textContent.trim(),
+                current: newMileageValue,
+                interval: serviceInterval,
+                lastKm: lastServiceKm,
+                prev: oldCurrentMileage,
+                reqDate: formattedRequestDate,
+                updateTimestamp: formattedTimestamp,
+                servDate: formattedServDate,
+                lastRound: lastRoundVal,
+                nextRound: nextRoundVal,
+                nextDate: formattedNextDate,
+                detail: detailInput && detailInput.value ? detailInput.value : (isChecked ? 'เช็คระยะแล้ว' : '-'),
+                status: isChecked ? '✔️ ทำแล้ว' : '❌ ยังไม่ทำ'
+            };
+
+            try {
+                // 1. อัพเดต vehicles
+                const { error: vErr } = await supabaseClient
+                    .from('vehicles')
+                    .update({
+                        num: updatePayload.num,
+                        plate: updatePayload.plate,
+                        current: updatePayload.current,
+                        interval: updatePayload.interval,
+                        lastKm: updatePayload.lastKm,
+                        prev: updatePayload.prev,
+                        reqDate: updatePayload.reqDate,
+                        updateTimestamp: updatePayload.updateTimestamp,
+                        servDate: updatePayload.servDate,
+                        lastRound: updatePayload.lastRound,
+                        nextRound: updatePayload.nextRound,
+                        nextDate: updatePayload.nextDate,
+                        detail: updatePayload.detail,
+                        status: updatePayload.status
+                    })
+                    .eq('id', updatePayload.id);
+
+                if (vErr) throw vErr;
+
+                // 2. บันทึกลง histories
+                const { error: hErr } = await supabaseClient
+                    .from('histories')
+                    .insert([{
+                        id: updatePayload.id,
+                        num: updatePayload.num,
+                        plate: updatePayload.plate,
+                        current: updatePayload.current,
+                        interval: updatePayload.interval,
+                        lastKm: updatePayload.lastKm,
+                        prev: updatePayload.prev,
+                        reqDate: updatePayload.reqDate,
+                        updateTimestamp: updatePayload.updateTimestamp,
+                        servDate: updatePayload.servDate,
+                        lastRound: updatePayload.lastRound,
+                        nextRound: updatePayload.nextRound,
+                        nextDate: updatePayload.nextDate,
+                        detail: updatePayload.detail,
+                        status: updatePayload.status
+                    }]);
+
+                if (hErr) throw hErr;
+
+                if (detailInput) detailInput.value = '';
+                if (doneCheckbox) doneCheckbox.checked = false;
+
+                alert('แก้ไขข้อมูลสำเร็จและบันทึกลงประวัติเรียบร้อย!');
+                location.reload();
+
+            } catch (error) {
+                console.error("Supabase update error:", error);
+                alert(`เกิดข้อผิดพลาดในการบันทึกข้อมูล: ${error.message || error}`);
+            }
+        }
+
+        // ----------------------------------------------------
+        // ฟังก์ชันลบประวัติ (Delete History from Supabase)
+        // ----------------------------------------------------
+        async function deleteHistory(logId, vehicleId) {
+            if (!confirm(`คุณต้องการลบประวัติ Log ID: ${logId} ใช่หรือไม่?`)) return;
+
+            if (!supabaseClient) {
+                alert('กรุณาเชื่อมต่อ Supabase ก่อนลบข้อมูล');
+                openSupabaseModal();
+                return;
+            }
+
+            try {
+                const { error } = await supabaseClient
+                    .from('histories')
+                    .delete()
+                    .eq('log_id', logId);
+
+                if (error) throw error;
+
+                alert('ลบประวัติเรียบร้อยแล้ว');
+                location.reload();
+            } catch (error) {
+                console.error("Supabase delete error:", error);
+                alert(`เกิดข้อผิดพลาดในการลบข้อมูล: ${error.message || error}`);
+            }
+        }
+    </script>
+
+</body>
+
+</html>
