@@ -65,31 +65,13 @@
         </div>
         <div class="flex items-center flex-wrap gap-2">
             <span id="supabaseStatusBadge" class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 border border-gray-300">
-                <span class="w-2 h-2 mr-1.5 rounded-full bg-gray-400"></span> กำลังตรวจสอบ Supabase...
+                <span class="w-2 h-2 mr-1.5 rounded-full bg-gray-400"></span> กำลังเชื่อมต่อ Supabase...
             </span>
-            <button type="button" onclick="openSupabaseModal()"
-                class="bg-gray-800 hover:bg-gray-900 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow transition flex items-center space-x-1">
-                <span>⚙️ ตั้งค่า Supabase</span>
-            </button>
             <button type="button" onclick="openBulkPopup()"
                 class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs shadow transition font-semibold flex items-center space-x-1">
                 <span>📋 นำเข้าข้อมูลชุด</span>
             </button>
         </div>
-    </div>
-
-    <!-- Alert แจ้งเตือนหากยังไม่เชื่อมต่อ Supabase -->
-    <div id="supabaseAlertBanner" class="max-w-full mx-auto bg-amber-50 border border-amber-300 rounded-xl p-4 mb-4 flex flex-wrap justify-between items-center gap-2 hidden">
-        <div class="flex items-center space-x-3">
-            <span class="text-2xl">⚠️</span>
-            <div>
-                <h3 class="text-sm font-bold text-amber-800">ยังไม่ได้เชื่อมต่อกับ Supabase Database</h3>
-                <p class="text-xs text-amber-700">กรุณาคลิก "ตั้งค่า Supabase" เพื่อระบุ Project URL และ Anon Key เพื่อโหลดข้อมูลรถและประวัติ</p>
-            </div>
-        </div>
-        <button type="button" onclick="openSupabaseModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">
-            ⚡ ตั้งค่าเดี๋ยวนี้
-        </button>
     </div>
 
     <!-- ตารางที่ 1: รถที่เหลือระยะทางน้อยกว่า 4,000 กม. / เกินกำหนด -->
@@ -202,47 +184,6 @@
         </div>
     </div>
 
-    <!-- Modal สำหรับตั้งค่าเชื่อมต่อ Supabase -->
-    <div id="supabaseConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
-        <div class="bg-white rounded-xl p-6 w-[500px] max-w-[95%] shadow-2xl">
-            <div class="flex justify-between items-center mb-3">
-                <h3 class="text-lg font-bold text-gray-800 flex items-center space-x-2">
-                    <span>⚡ ตั้งค่าการเชื่อมต่อ Supabase</span>
-                </h3>
-                <button type="button" onclick="closeSupabaseModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold">&times;</button>
-            </div>
-            <p class="text-xs text-gray-500 mb-4">
-                ข้อมูลการเชื่อมต่อจะถูกบันทึกไว้ใน Browser (localStorage) ปลอดภัยและเหมาะสำหรับการใช้งานบน Vercel
-            </p>
-
-            <div class="mb-3">
-                <label class="block text-xs font-semibold text-gray-700 mb-1">Supabase Project URL:</label>
-                <input type="text" id="supabaseUrlInput"
-                    class="w-full border border-gray-300 rounded p-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-400"
-                    placeholder="https://xxxxxxxxxxxxxxxxxxxx.supabase.co">
-            </div>
-
-            <div class="mb-4">
-                <label class="block text-xs font-semibold text-gray-700 mb-1">Supabase Anon Public Key:</label>
-                <textarea id="supabaseKeyInput" rows="3"
-                    class="w-full border border-gray-300 rounded p-2 text-xs font-mono outline-none focus:ring-2 focus:ring-indigo-400"
-                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."></textarea>
-            </div>
-
-            <div id="supabaseTestResult" class="text-xs mb-3 hidden p-2.5 rounded border"></div>
-
-            <div class="flex justify-between items-center pt-2 border-t">
-                <button type="button" onclick="clearSupabaseConfig()"
-                    class="text-red-500 hover:text-red-700 text-xs font-semibold">ล้างค่าที่จำไว้</button>
-                <div class="flex space-x-2">
-                    <button type="button" onclick="closeSupabaseModal()"
-                        class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1.5 rounded text-xs">ปิด</button>
-                    <button type="button" onclick="saveAndTestSupabase()" id="btnSaveSupabase"
-                        class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded text-xs font-semibold shadow">บันทึก & เชื่อมต่อ</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Modal สำหรับเลือกวันที่ -->
     <div id="dateModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50">
@@ -329,20 +270,17 @@
         // การจัดการ Supabase Client & Configuration
         // ----------------------------------------------------
         function getSupabaseCredentials() {
-            const localUrl = localStorage.getItem('kat_supabase_url');
-            const localKey = localStorage.getItem('kat_supabase_key');
-            if (localUrl && localKey) {
-                return { url: localUrl.trim(), anonKey: localKey.trim() };
-            }
             if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.anonKey) {
                 return { url: window.SUPABASE_CONFIG.url.trim(), anonKey: window.SUPABASE_CONFIG.anonKey.trim() };
             }
-            return null;
+            return {
+                url: 'https://frbyowazvgveavskgbrr.supabase.co',
+                anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyYnlvd2F6dmd2ZWF2c2tnYnJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkxOTUyNDIsImV4cCI6MjEwNDc3MTI0Mn0.AcracXzxM5MNdB-1VJ5cJ4fdNBI5WMP4LeH49tIZLss'
+            };
         }
 
         function updateSupabaseStatusBadge(isConnected, url = '') {
             const badge = document.getElementById('supabaseStatusBadge');
-            const alertBanner = document.getElementById('supabaseAlertBanner');
             if (!badge) return;
 
             if (isConnected) {
@@ -354,75 +292,9 @@
                 }
                 badge.className = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-300";
                 badge.innerHTML = `<span class="w-2 h-2 mr-1.5 rounded-full bg-green-500"></span> 🟢 Supabase: ${host}`;
-                if (alertBanner) alertBanner.classList.add('hidden');
             } else {
-                badge.className = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-300";
-                badge.innerHTML = `<span class="w-2 h-2 mr-1.5 rounded-full bg-amber-500"></span> ⚠️ ยังไม่เชื่อมต่อ Supabase`;
-                if (alertBanner) alertBanner.classList.remove('hidden');
-            }
-        }
-
-        function openSupabaseModal() {
-            const creds = getSupabaseCredentials() || { url: '', anonKey: '' };
-            document.getElementById('supabaseUrlInput').value = creds.url;
-            document.getElementById('supabaseKeyInput').value = creds.anonKey;
-            document.getElementById('supabaseTestResult').classList.add('hidden');
-            document.getElementById('supabaseConfigModal').classList.remove('hidden');
-        }
-
-        function closeSupabaseModal() {
-            document.getElementById('supabaseConfigModal').classList.add('hidden');
-        }
-
-        function clearSupabaseConfig() {
-            if (!confirm('ต้องการล้างค่าการเชื่อมต่อ Supabase ที่จำไว้ใน Browser หรือไม่?')) return;
-            localStorage.removeItem('kat_supabase_url');
-            localStorage.removeItem('kat_supabase_key');
-            document.getElementById('supabaseUrlInput').value = '';
-            document.getElementById('supabaseKeyInput').value = '';
-            supabaseClient = null;
-            updateSupabaseStatusBadge(false);
-            alert('ล้างค่าการเชื่อมต่อเรียบร้อยแล้ว');
-            closeSupabaseModal();
-            location.reload();
-        }
-
-        async function saveAndTestSupabase() {
-            const url = document.getElementById('supabaseUrlInput').value.trim();
-            const key = document.getElementById('supabaseKeyInput').value.trim();
-            const resDiv = document.getElementById('supabaseTestResult');
-
-            if (!url || !key) {
-                resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-red-50 text-red-700 border-red-200 block";
-                resDiv.textContent = "กรุณากรอกทั้ง Project URL และ Anon Key ให้ครบถ้วน";
-                return;
-            }
-
-            resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-blue-50 text-blue-700 border-blue-200 block";
-            resDiv.textContent = "กำลังทดสอบเชื่อมต่อไปยัง Supabase...";
-
-            try {
-                const testClient = window.supabase.createClient(url, key);
-                const { data, error } = await testClient.from('vehicles').select('id').limit(1);
-
-                if (error) throw error;
-
-                localStorage.setItem('kat_supabase_url', url);
-                localStorage.setItem('kat_supabase_key', key);
-                supabaseClient = testClient;
-
-                resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-green-50 text-green-700 border-green-200 block";
-                resDiv.textContent = "เชื่อมต่อสำเร็จและบันทึกเรียบร้อย! กำลังรีโหลดหน้าเว็บ...";
-
-                setTimeout(() => {
-                    closeSupabaseModal();
-                    location.reload();
-                }, 1000);
-
-            } catch (err) {
-                console.error("Test connection failed:", err);
-                resDiv.className = "text-xs mb-3 p-2.5 rounded border bg-red-50 text-red-700 border-red-200 block";
-                resDiv.textContent = `เชื่อมต่อไม่สำเร็จ: ${err.message || 'โปรดตรวจสอบ URL, Key และ SQL Schema ใน Supabase'}`;
+                badge.className = "inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-300";
+                badge.innerHTML = `<span class="w-2 h-2 mr-1.5 rounded-full bg-red-500"></span> ❌ เชื่อมต่อ Supabase ไม่สำเร็จ`;
             }
         }
 
